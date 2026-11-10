@@ -19,7 +19,16 @@ export const ShareModal: React.FC<ShareModalProps> = ({
 
   if (!isOpen) return null;
 
-  const clientUrl = `${window.location.origin}${window.location.pathname}?view=client`;
+  const params = new URLSearchParams({
+    view: 'client',
+    format: settings.format,
+    pages: String(settings.pageCount),
+    weight: String(settings.paperWeight),
+    finish: settings.paperFinish,
+    angle: String(Math.round(settings.openAngle)),
+    spread: String(settings.currentSpread),
+  });
+  const clientUrl = `${window.location.origin}${window.location.pathname}?${params.toString()}`;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(clientUrl);

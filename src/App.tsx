@@ -6,7 +6,7 @@ import { ControlsOverlay } from './components/ControlsOverlay';
 import { ThreeCanvas, ThreeCanvasHandle } from './components/ThreeCanvas';
 import { PrintFinishesModal } from './components/PrintFinishesModal';
 import { ShareModal } from './components/ShareModal';
-import { BookSettings, PageSlot } from './types';
+import { BookSettings, PageSlot, PageFormat, PaperFinish, PaperWeight, FORMAT_DIMENSIONS } from './types';
 import { generateSampleInvitationPages } from './utils/sampleData';
 
 const SETTINGS_STORAGE_KEY = 'mockz_settings_v3';
@@ -69,23 +69,44 @@ function generatePageSlots(count: number): PageSlot[] {
 }
 
 export function App() {
+  const urlParams = useMemo(() => new URLSearchParams(window.location.search), []);
   const [isClientMode, setIsClientMode] = useState<boolean>(() => {
-    return new URLSearchParams(window.location.search).get('view') === 'client';
+    return urlParams.get('view') === 'client';
   });
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const [settings, setSettings] = useState<BookSettings>(() => {
+    const fmt = urlParams.get('format') as PageFormat | null;
+    const count = parseInt(urlParams.get('pages') || '0', 10);
+    const weight = parseInt(urlParams.get('weight') || '0', 10) as PaperWeight;
+    const finish = urlParams.get('finish') as PaperFinish | null;
+    const angle = parseInt(urlParams.get('angle') || '-1', 10);
+    const spread = parseInt(urlParams.get('spread') || '-1', 10);
+
+    const base: BookSettings = { ...DEFAULT_SETTINGS };
+
     try {
       const saved = localStorage.getItem(SETTINGS_STORAGE_KEY);
-      if (saved) return { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
+      if (saved && urlParams.get('view') !== 'client') {
+        Object.assign(base, JSON.parse(saved));
+      }
     } catch { /* ignore */ }
-    return DEFAULT_SETTINGS;
+
+    if (fmt && FORMAT_DIMENSIONS[fmt]) base.format = fmt;
+    if (count >= 4 && count % 2 === 0) base.pageCount = count;
+    if ([120, 250, 350].includes(weight)) base.paperWeight = weight;
+    if (['matte', 'glossy', 'kraft', 'textured'].includes(finish || '')) base.paperFinish = finish!;
+    if (angle >= 0 && angle <= 180) base.openAngle = angle;
+    if (spread >= 0) base.currentSpread = spread;
+
+    return base;
   });
 
   const [pages, setPages] = useState<PageSlot[]>(() => {
     const sampleImages = generateSampleInvitationPages();
-    const slots = generatePageSlots(4);
+    const count = settings.pageCount || 4;
+    const slots = generatePageSlots(count);
     return slots.map((s, idx) => ({
       ...s,
       imageUrl: sampleImages[idx] || null,
