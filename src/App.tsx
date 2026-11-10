@@ -571,6 +571,7 @@ export function App() {
               onOpenCommentsModal={() => setIsCommentsModalOpen(true)}
               onOpenBATModal={() => setIsBATModalOpen(true)}
               onRefresh={handleRefreshFromCloud}
+              onCenterInView={() => threeCanvasRef.current?.centerInView()}
               isRefreshing={isRefreshing}
             />
           ) : (
@@ -582,6 +583,7 @@ export function App() {
               onUpdateSettings={updateSettings}
               onExport={handleExport}
               onResetCamera={(preset) => threeCanvasRef.current?.resetCamera(preset)}
+              onCenterInView={() => threeCanvasRef.current?.centerInView()}
               onOpenFinishesModal={() => setIsFinishesModalOpen(true)}
               onOpenCommentsModal={() => setIsCommentsModalOpen(true)}
               onOpenBATModal={() => setIsBATModalOpen(true)}
@@ -623,13 +625,14 @@ export function App() {
                 canPrevPage={canPrevPage}
                 canNextPage={canNextPage}
                 currentSpreadLabel={currentSpreadLabel}
+                onCenterInView={() => threeCanvasRef.current?.centerInView()}
               />
 
-              {/* Floating Bottom-Right Action Button (FAB) for Collapsible Comments Panel */}
+              {/* Floating Action Button (FAB) for Collapsible Comments Panel - Placed above bottom bar on mobile */}
               <button
                 type="button"
                 onClick={() => setIsCommentsModalOpen((prev) => !prev)}
-                className={`absolute bottom-6 right-6 z-40 p-3 sm:px-4 sm:py-3 rounded-2xl shadow-2xl flex items-center gap-2.5 font-bold text-xs transition-all active:scale-95 border ${
+                className={`absolute bottom-20 sm:bottom-6 right-3 sm:right-6 z-40 p-2.5 sm:px-4 sm:py-3 rounded-2xl shadow-2xl flex items-center gap-2 font-bold text-xs transition-all active:scale-95 border ${
                   isCommentsModalOpen
                     ? 'bg-dark-800 text-gold-400 border-gold-400/40 shadow-black'
                     : 'bg-gold-400 hover:bg-gold-300 text-dark-950 border-gold-300 shadow-gold-500/20 hover:scale-105'

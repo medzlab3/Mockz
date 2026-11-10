@@ -7,7 +7,8 @@ import {
   Minimize,
   MessageSquare,
   FileCheck,
-  RefreshCw
+  RefreshCw,
+  Focus
 } from 'lucide-react';
 import { BookSettings, FORMAT_DIMENSIONS, BATApproval } from '../types';
 
@@ -19,6 +20,7 @@ interface ClientHeaderProps {
   onOpenCommentsModal: () => void;
   onOpenBATModal: () => void;
   onRefresh: () => void;
+  onCenterInView?: () => void;
   isRefreshing?: boolean;
 }
 
@@ -30,6 +32,7 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
   onOpenCommentsModal,
   onOpenBATModal,
   onRefresh,
+  onCenterInView,
   isRefreshing = false,
 }) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -114,6 +117,18 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
           <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-gold-400' : ''}`} />
           <span className="hidden sm:inline">Actualiser</span>
         </button>
+
+        {/* Recentrer la vue (Center in View) */}
+        {onCenterInView && (
+          <button
+            onClick={onCenterInView}
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-xl text-xs font-semibold bg-dark-800 hover:bg-dark-750 text-dark-200 hover:text-gold-400 border border-dark-750 hover:border-gold-400/40 transition-all shadow-sm active:scale-95"
+            title="Recentrer le livre dans l'écran (Center in View)"
+          >
+            <Focus className="w-3.5 h-3.5 text-gold-400" />
+            <span className="hidden md:inline">Recentrer</span>
+          </button>
+        )}
 
         {/* Choix Papier & Finitions pour le client */}
         <button

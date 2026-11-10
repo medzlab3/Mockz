@@ -1,18 +1,39 @@
 import { useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { BookSettings, PageSlot, FORMAT_DIMENSIONS } from '../types';
+import { BookSettings, PageSlot, FORMAT_DIMENSIONS, PageFormat } from '../types';
 import { Book3DModel } from './Book3D';
 
 export interface ThreeCanvasHandle {
   exportImage: (format?: 'png' | 'jpeg') => string | null;
   resetCamera: (preset?: 'perspective' | 'front' | 'top' | 'spine') => void;
+  centerInView: () => void;
 }
 
 interface ThreeCanvasProps {
   settings: BookSettings;
   pages: PageSlot[];
   onCanvasReady?: () => void;
+}
+
+function getOptimalCameraDistance(
+  format: PageFormat,
+  aspect: number,
+  openAngle: number = 0
+): number {
+  const dims = FORMAT_DIMENSIONS[format] || FORMAT_DIMENSIONS.a5;
+  const isOpened = openAngle > 10;
+  // A book when opened has width ~ 2 * page width; closed is 1 * page width
+  const bookWidth = isOpened ? dims.width * 2.15 : dims.width * 1.35;
+  const bookHeight = dims.height * 1.35;
+
+  const fovRad = THREE.MathUtils.degToRad(38 / 2);
+  const tanFov = Math.tan(fovRad);
+
+  const distV = bookHeight / (2 * tanFov);
+  const distH = bookWidth / (2 * tanFov * Math.max(0.2, aspect));
+
+  return Math.max(distV, distH, 3.2);
 }
 
 export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(
@@ -37,23 +58,50 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(
         rendererRef.current.render(sceneRef.current, cameraRef.current);
         return rendererRef.current.domElement.toDataURL(`image/${format}`, 0.95);
       },
-      resetCamera: (preset = 'perspective') => {
-        if (!cameraRef.current || !controlsRef.current) return;
+      centerInView: () => {
+        if (!cameraRef.current || !controlsRef.current || !containerRef.current) return;
         const camera = cameraRef.current;
         const controls = controlsRef.current;
-        const dims = FORMAT_DIMENSIONS[settingsRef.current.format] || FORMAT_DIMENSIONS.a5;
-        const dist = Math.max(dims.width, dims.height) * 2.4;
+        const container = containerRef.current;
+        const w = container.clientWidth || window.innerWidth;
+        const h = container.clientHeight || window.innerHeight;
+        const aspect = w / Math.max(1, h);
 
-        if (preset === 'perspective') {
-          camera.position.set(dist * 0.7, dist * 0.65, dist * 1.1);
-        } else if (preset === 'front') {
-          camera.position.set(0, 0, dist * 1.0);
-        } else if (preset === 'top') {
-          camera.position.set(0, dist * 1.6, 0.01);
-        } else if (preset === 'spine') {
-          camera.position.set(-dist * 1.2, 0, 0);
-        }
+        const optimalDist = getOptimalCameraDistance(
+          settingsRef.current.format,
+          aspect,
+          settingsRef.current.openAngle
+        );
+
         controls.target.set(0, 0, 0);
+        camera.position.set(0, 0, optimalDist);
+        controls.update();
+      },
+      resetCamera: (preset = 'front') => {
+        if (!cameraRef.current || !controlsRef.current || !containerRef.current) return;
+        const camera = cameraRef.current;
+        const controls = controlsRef.current;
+        const container = containerRef.current;
+        const w = container.clientWidth || window.innerWidth;
+        const h = container.clientHeight || window.innerHeight;
+        const aspect = w / Math.max(1, h);
+
+        const baseDist = getOptimalCameraDistance(
+          settingsRef.current.format,
+          aspect,
+          settingsRef.current.openAngle
+        );
+
+        controls.target.set(0, 0, 0);
+        if (preset === 'perspective') {
+          camera.position.set(baseDist * 0.7, baseDist * 0.65, baseDist * 1.1);
+        } else if (preset === 'front') {
+          camera.position.set(0, 0, baseDist);
+        } else if (preset === 'top') {
+          camera.position.set(0, baseDist * 1.4, 0.01);
+        } else if (preset === 'spine') {
+          camera.position.set(-baseDist * 1.2, 0, 0);
+        }
         controls.update();
       },
     }));
@@ -71,17 +119,18 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(
       updateSceneBackground(scene, settingsRef.current.backgroundTheme);
       sceneRef.current = scene;
 
-      // Camera
-      const dims = FORMAT_DIMENSIONS[settingsRef.current.format] || FORMAT_DIMENSIONS.a5;
-      const camera = new THREE.PerspectiveCamera(
-        38,
-        container.clientWidth / container.clientHeight,
-        0.1,
-        100
+      // Camera: calibrated distance ensures the book is never cropped on mobile or desktop
+      const w = container.clientWidth;
+      const h = container.clientHeight;
+      const aspect = w / Math.max(1, h);
+
+      const camera = new THREE.PerspectiveCamera(38, aspect, 0.1, 100);
+      const d0 = getOptimalCameraDistance(
+        settingsRef.current.format,
+        aspect,
+        settingsRef.current.openAngle
       );
-      const d0 = Math.max(dims.width, dims.height) * 2.4;
-      // Centered front-face view, nicely zoomed in to occupy viewport
-      camera.position.set(0, 0, d0 * 1.0);
+      camera.position.set(0, 0, d0);
       cameraRef.current = camera;
 
       // Renderer
@@ -140,7 +189,7 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(
       rimLight.position.set(0, -6, -8);
       scene.add(rimLight);
 
-      // Book model (empty shell — first real build happens in the update effect below)
+      // Book model
       const bookModel = new Book3DModel(settingsRef.current, []);
       scene.add(bookModel.root);
       bookModelRef.current = bookModel;
@@ -153,7 +202,6 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(
         const delta = Math.min((currentTime - prevTime) / 1000, 0.1);
         prevTime = currentTime;
 
-        // Always read LATEST toggle from ref
         controls.autoRotate = settingsRef.current.autoRotate;
         controls.update();
 
@@ -166,11 +214,12 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(
 
       // Resize
       const handleResize = () => {
-        const w = container.clientWidth;
-        const h = container.clientHeight;
-        camera.aspect = w / h;
+        const rw = container.clientWidth;
+        const rh = container.clientHeight;
+        if (!rw || !rh) return;
+        camera.aspect = rw / rh;
         camera.updateProjectionMatrix();
-        renderer.setSize(w, h);
+        renderer.setSize(rw, rh);
       };
       const ro = new ResizeObserver(handleResize);
       ro.observe(container);
@@ -186,7 +235,6 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(
 
     // ──────────────────────────────────────────────────────────────────
     //  SINGLE MERGED EFFECT for settings + pages changes
-    //  Decides whether we need a full rebuild or just a lightweight update.
     // ──────────────────────────────────────────────────────────────────
     const prevSettingsRef = useRef<BookSettings | null>(null);
     const prevPagesRef = useRef<PageSlot[] | null>(null);
@@ -195,7 +243,6 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(
       const book = bookModelRef.current;
       if (!book) return;
 
-      // Update scene background (always — cheap operation)
       if (sceneRef.current) {
         updateSceneBackground(sceneRef.current, settings.backgroundTheme);
       }
@@ -203,10 +250,8 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(
       const prev = prevSettingsRef.current;
       const prevPages = prevPagesRef.current;
 
-      // First render after mount → always full build
       const isFirstRender = prev === null;
 
-      // Structural changes that require full rebuild
       const structuralChange = !isFirstRender && prev && (
         settings.format !== prev.format ||
         settings.pageCount !== prev.pageCount ||
@@ -214,13 +259,11 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(
         settings.paperWeight !== prev.paperWeight
       );
 
-      // Page content changed (different array reference = different images)
       const pagesChanged = pages !== prevPages;
 
       if (isFirstRender || structuralChange || pagesChanged) {
         book.rebuildFull(settings, pages);
       } else {
-        // Only angle / rotation / theme changed → lightweight
         book.updateLightSettings(settings);
       }
 

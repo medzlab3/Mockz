@@ -8,7 +8,8 @@ import {
   Menu,
   MessageSquare,
   FileCheck,
-  Cloud
+  Cloud,
+  Focus
 } from 'lucide-react';
 import { BookSettings, PageFormat, FORMAT_DIMENSIONS, BATApproval } from '../types';
 
@@ -20,6 +21,7 @@ interface HeaderProps {
   onUpdateSettings: (newSettings: Partial<BookSettings>) => void;
   onExport: () => void;
   onResetCamera: (preset: 'perspective' | 'front' | 'spine') => void;
+  onCenterInView?: () => void;
   onOpenFinishesModal: () => void;
   onOpenCommentsModal: () => void;
   onOpenBATModal: () => void;
@@ -35,6 +37,7 @@ export const Header: React.FC<HeaderProps> = ({
   onUpdateSettings,
   onExport,
   onResetCamera,
+  onCenterInView,
   onOpenFinishesModal,
   onOpenCommentsModal,
   onOpenBATModal,
@@ -146,6 +149,16 @@ export const Header: React.FC<HeaderProps> = ({
           >
             Tranche
           </button>
+          {onCenterInView && (
+            <button
+              onClick={onCenterInView}
+              className="px-2.5 py-1 rounded-lg text-xs text-gold-400 hover:text-gold-300 hover:bg-dark-700/50 transition-all font-medium flex items-center gap-1 border-l border-dark-700/60 ml-0.5 pl-2"
+              title="Recentrer le livre dans le viewport (Center in View)"
+            >
+              <Focus className="w-3.5 h-3.5 text-gold-400" />
+              <span>Recentrer</span>
+            </button>
+          )}
         </div>
       </div>
 
