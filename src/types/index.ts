@@ -26,10 +26,32 @@ export interface BookSettings {
   backgroundTheme: 'dark' | 'light' | 'studio' | 'transparent';
 }
 
+export interface ClientComment {
+  id: string;
+  pageIndex: number | 'all'; // 1-based page index or 'all' for global
+  author: string;
+  text: string;
+  createdAt: string;
+  resolved?: boolean;
+}
+
+export interface BATApproval {
+  approved: boolean;
+  approvedAt: string;
+  clientName: string;
+  clientEmail?: string;
+  company?: string;
+  format: PageFormat;
+  paperWeight: PaperWeight;
+  paperFinish: PaperFinish;
+  pageCount: number;
+  notes?: string;
+  batReference?: string;
+}
+
 export const FORMAT_DIMENSIONS: Record<PageFormat, { width: number; height: number; ratio: string; label: string }> = {
   a5: { width: 3.0, height: 4.24, ratio: '1 : 1.41', label: 'A5 Portrait (148 × 210 mm)' },
   a4: { width: 3.2, height: 4.52, ratio: '1 : 1.41', label: 'A4 Portrait (210 × 297 mm)' },
   square: { width: 3.5, height: 3.5, ratio: '1 : 1', label: 'Carré (150 × 150 mm)' },
   landscape: { width: 4.5, height: 3.18, ratio: '1.41 : 1', label: 'A5 Paysage (210 × 148 mm)' },
 };
-

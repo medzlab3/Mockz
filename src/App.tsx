@@ -6,10 +6,23 @@ import { ControlsOverlay } from './components/ControlsOverlay';
 import { ThreeCanvas, ThreeCanvasHandle } from './components/ThreeCanvas';
 import { PrintFinishesModal } from './components/PrintFinishesModal';
 import { ShareModal } from './components/ShareModal';
-import { BookSettings, PageSlot, PageFormat, PaperFinish, PaperWeight, FORMAT_DIMENSIONS } from './types';
+import { ClientCommentsModal } from './components/ClientCommentsModal';
+import { BATApprovalModal } from './components/BATApprovalModal';
+import {
+  BookSettings,
+  PageSlot,
+  PageFormat,
+  PaperFinish,
+  PaperWeight,
+  FORMAT_DIMENSIONS,
+  ClientComment,
+  BATApproval
+} from './types';
 import { generateSampleInvitationPages } from './utils/sampleData';
 
 const SETTINGS_STORAGE_KEY = 'mockz_settings_v3';
+const COMMENTS_STORAGE_KEY = 'mockz_comments_v1';
+const BAT_STORAGE_KEY = 'mockz_bat_approval_v1';
 
 const DEFAULT_SETTINGS: BookSettings = {
   format: 'a5',
@@ -70,7 +83,7 @@ function generatePageSlots(count: number): PageSlot[] {
 
 export function App() {
   const urlParams = useMemo(() => new URLSearchParams(window.location.search), []);
-  const [isClientMode, setIsClientMode] = useState<boolean>(() => {
+  const [isClientMode] = useState<boolean>(() => {
     return urlParams.get('view') === 'client';
   });
 
@@ -113,17 +126,46 @@ export function App() {
     }));
   });
 
+  // Client Comments State
+  const [comments, setComments] = useState<ClientComment[]>(() => {
+    try {
+      const saved = localStorage.getItem(COMMENTS_STORAGE_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch { /* ignore */ }
+    return [];
+  });
+
+  // BAT Approval State
+  const [batApproval, setBatApproval] = useState<BATApproval | null>(() => {
+    try {
+      const saved = localStorage.getItem(BAT_STORAGE_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch { /* ignore */ }
+    return null;
+  });
+
+  // Modals
   const [isFinishesModalOpen, setIsFinishesModalOpen] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [isCommentsModalOpen, setIsCommentsModalOpen] = useState(false);
+  const [isBATModalOpen, setIsBATModalOpen] = useState(false);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
 
   const threeCanvasRef = useRef<ThreeCanvasHandle>(null);
 
+  // Sync settings
   useEffect(() => {
     try {
       localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
     } catch { /* ignore */ }
   }, [settings]);
+
+  // Sync comments
+  useEffect(() => {
+    try {
+      localStorage.setItem(COMMENTS_STORAGE_KEY, JSON.stringify(comments));
+    } catch { /* ignore */ }
+  }, [comments]);
 
   const updateSettings = useCallback((patch: Partial<BookSettings>) => {
     setSettings((prev) => ({ ...prev, ...patch }));
@@ -133,6 +175,25 @@ export function App() {
     setPages((prev) =>
       prev.map((p, idx) => (idx === pageIndex ? { ...p, imageUrl } : p))
     );
+  }, []);
+
+  // Reorder page card (move up / down / drag)
+  const handleReorderPage = useCallback((fromIndex: number, toIndex: number) => {
+    setPages((prev) => {
+      if (fromIndex < 0 || toIndex < 0 || fromIndex >= prev.length || toIndex >= prev.length) {
+        return prev;
+      }
+      const updated = [...prev];
+      const [movedItem] = updated.splice(fromIndex, 1);
+      updated.splice(toIndex, 0, movedItem);
+
+      // Re-assign slot labels and side mappings based on new positions 1..N
+      const freshSlots = generatePageSlots(updated.length);
+      return updated.map((item, idx) => ({
+        ...freshSlots[idx],
+        imageUrl: item.imageUrl,
+      }));
+    });
   }, []);
 
   const handleApplyPdfPages = useCallback((images: string[]) => {
@@ -194,6 +255,36 @@ export function App() {
     });
   }, []);
 
+  // Comments handlers
+  const handleAddComment = useCallback((newComment: Omit<ClientComment, 'id' | 'createdAt'>) => {
+    const comment: ClientComment = {
+      ...newComment,
+      id: `cmt-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      createdAt: new Date().toISOString(),
+    };
+    setComments((prev) => [comment, ...prev]);
+  }, []);
+
+  const handleDeleteComment = useCallback((id: string) => {
+    setComments((prev) => prev.filter((c) => c.id !== id));
+  }, []);
+
+  const handleToggleResolveComment = useCallback((id: string) => {
+    setComments((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, resolved: !c.resolved } : c))
+    );
+  }, []);
+
+  // BAT handler
+  const handleSaveBAT = useCallback((approval: BATApproval) => {
+    setBatApproval(approval);
+    try {
+      localStorage.setItem(BAT_STORAGE_KEY, JSON.stringify(approval));
+    } catch { /* ignore */ }
+    setExportMessage('Bon À Tirer (BAT) validé et enregistré !');
+    setTimeout(() => setExportMessage(null), 4000);
+  }, []);
+
   const handleExport = useCallback(() => {
     if (!threeCanvasRef.current) return;
     const dataUrl = threeCanvasRef.current.exportImage('png');
@@ -253,6 +344,8 @@ export function App() {
     return `P. ${leftPage} — ${rightPage}`;
   }, [currentSpread, numSheets]);
 
+  const activeCommentsCount = comments.filter((c) => !c.resolved).length;
+
   return (
     <div className="flex flex-col h-full w-full bg-dark-950 text-dark-50 overflow-hidden font-sans">
       {exportMessage && (
@@ -264,20 +357,23 @@ export function App() {
       {isClientMode ? (
         <ClientHeader
           settings={settings}
-          onExitClientMode={() => {
-            setIsClientMode(false);
-            const url = new URL(window.location.href);
-            url.searchParams.delete('view');
-            window.history.pushState({}, '', url.toString());
-          }}
+          commentsCount={activeCommentsCount}
+          batApproval={batApproval}
+          onOpenFinishesModal={() => setIsFinishesModalOpen(true)}
+          onOpenCommentsModal={() => setIsCommentsModalOpen(true)}
+          onOpenBATModal={() => setIsBATModalOpen(true)}
         />
       ) : (
         <Header
           settings={settings}
+          commentsCount={activeCommentsCount}
+          batApproval={batApproval}
           onUpdateSettings={updateSettings}
           onExport={handleExport}
           onResetCamera={(preset) => threeCanvasRef.current?.resetCamera(preset)}
           onOpenFinishesModal={() => setIsFinishesModalOpen(true)}
+          onOpenCommentsModal={() => setIsCommentsModalOpen(true)}
+          onOpenBATModal={() => setIsBATModalOpen(true)}
           onOpenShareModal={() => setIsShareModalOpen(true)}
           onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
         />
@@ -296,6 +392,7 @@ export function App() {
             onLoadSampleDesign={handleLoadSampleDesign}
             onResetProject={handleResetProject}
             onPageCountChange={handlePageCountChange}
+            onReorderPage={handleReorderPage}
           />
         )}
 
@@ -323,15 +420,34 @@ export function App() {
         settings={settings}
         onUpdateSettings={updateSettings}
       />
+
+      <ClientCommentsModal
+        isOpen={isCommentsModalOpen}
+        onClose={() => setIsCommentsModalOpen(false)}
+        comments={comments}
+        pages={pages}
+        onAddComment={handleAddComment}
+        onDeleteComment={handleDeleteComment}
+        onToggleResolveComment={handleToggleResolveComment}
+        isClientMode={isClientMode}
+      />
+
+      <BATApprovalModal
+        isOpen={isBATModalOpen}
+        onClose={() => setIsBATModalOpen(false)}
+        settings={settings}
+        batApproval={batApproval}
+        onSaveBAT={handleSaveBAT}
+      />
+
       <ShareModal
         isOpen={isShareModalOpen}
         onClose={() => setIsShareModalOpen(false)}
         settings={settings}
         onSwitchToClientMode={() => {
-          setIsClientMode(true);
           const url = new URL(window.location.href);
           url.searchParams.set('view', 'client');
-          window.history.pushState({}, '', url.toString());
+          window.location.href = url.toString();
         }}
       />
     </div>
