@@ -8,6 +8,7 @@ import { PrintFinishesModal } from './components/PrintFinishesModal';
 import { ShareModal } from './components/ShareModal';
 import { ClientCommentsModal } from './components/ClientCommentsModal';
 import { BATApprovalModal } from './components/BATApprovalModal';
+import { MessageSquare, RefreshCw } from 'lucide-react';
 import {
   BookSettings,
   PageSlot,
@@ -25,8 +26,8 @@ import { saveProjectToCloud, loadProjectFromCloud } from './utils/cloudSync';
 const DEFAULT_SETTINGS: BookSettings = {
   format: 'a5',
   pageCount: 4,
-  openAngle: 90,
-  currentSpread: 1,
+  openAngle: 0,
+  currentSpread: 0,
   coverPaperWeight: 350,
   coverPaperFinish: 'matte',
   insidePaperWeight: 120,
@@ -113,6 +114,7 @@ export function App() {
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
+  // Settings: default openAngle 0 and currentSpread 0 (closed on front cover)
   const [settings, setSettings] = useState<BookSettings>(() => {
     const fmt = urlParams.get('format') as PageFormat | null;
     const count = parseInt(urlParams.get('pages') || '0', 10);
@@ -140,11 +142,22 @@ export function App() {
       base.coverPaperFinish = finish!;
       base.paperFinish = finish!;
     }
-    if (angle >= 0 && angle <= 180) base.openAngle = angle;
-    if (spread >= 0) base.currentSpread = spread;
+    if (angle >= 0 && angle <= 180) {
+      base.openAngle = angle;
+    } else {
+      base.openAngle = 0; // Default closed
+    }
+    if (spread >= 0) {
+      base.currentSpread = spread;
+    } else {
+      base.currentSpread = 0; // Default cover
+    }
 
     return base;
   });
+
+  // Client loading indicator: in client mode, wait for cloud project before rendering
+  const [isLoadingCloud, setIsLoadingCloud] = useState<boolean>(isClientMode);
 
   const [pages, setPages] = useState<PageSlot[]>(() => {
     try {
@@ -153,6 +166,11 @@ export function App() {
         return JSON.parse(savedPages);
       }
     } catch { /* ignore */ }
+
+    // Client mode starts with empty slots (waiting for cloud load)
+    if (isClientMode) {
+      return generatePageSlots(settings.pageCount || 4);
+    }
 
     const sampleImages = generateSampleInvitationPages();
     const count = settings.pageCount || 4;
@@ -186,7 +204,7 @@ export function App() {
   const [isSavingCloud, setIsSavingCloud] = useState(false);
   const isInitialMount = useRef(true);
 
-  // Modals
+  // Modals & Panels
   const [isFinishesModalOpen, setIsFinishesModalOpen] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [isCommentsModalOpen, setIsCommentsModalOpen] = useState(false);
@@ -195,16 +213,28 @@ export function App() {
 
   const threeCanvasRef = useRef<ThreeCanvasHandle>(null);
 
-  // Initial load from Cloud Firestore if project exists in cloud
+  // Initial load from Cloud Firestore
   useEffect(() => {
-    loadProjectFromCloud(projectId).then((cloudProject) => {
-      if (cloudProject) {
-        if (cloudProject.settings) setSettings(cloudProject.settings);
-        if (cloudProject.pages && cloudProject.pages.length > 0) setPages(cloudProject.pages);
-        if (cloudProject.comments) setComments(cloudProject.comments);
-        if (cloudProject.batApproval) setBatApproval(cloudProject.batApproval);
-      }
-    });
+    let isCancelled = false;
+    loadProjectFromCloud(projectId)
+      .then((cloudProject) => {
+        if (isCancelled) return;
+        if (cloudProject) {
+          if (cloudProject.settings) setSettings(cloudProject.settings);
+          if (cloudProject.pages && cloudProject.pages.length > 0) setPages(cloudProject.pages);
+          if (cloudProject.comments) setComments(cloudProject.comments);
+          if (cloudProject.batApproval) setBatApproval(cloudProject.batApproval);
+        }
+        setIsLoadingCloud(false);
+      })
+      .catch((err) => {
+        console.warn('Initial cloud fetch error:', err);
+        if (!isCancelled) setIsLoadingCloud(false);
+      });
+
+    return () => {
+      isCancelled = true;
+    };
   }, [projectId]);
 
   // Sync to local project storage
@@ -263,6 +293,21 @@ export function App() {
     }
   }, [projectId]);
 
+  // Immediate save before sharing
+  const handleOpenShareModal = useCallback(async () => {
+    setIsShareModalOpen(true);
+    setIsSavingCloud(true);
+    await saveProjectToCloud(projectId, {
+      id: projectId,
+      settings,
+      pages,
+      comments,
+      batApproval,
+      updatedAt: new Date().toISOString(),
+    });
+    setIsSavingCloud(false);
+  }, [projectId, settings, pages, comments, batApproval]);
+
   const updateSettings = useCallback((patch: Partial<BookSettings>) => {
     setSettings((prev) => ({ ...prev, ...patch }));
   }, []);
@@ -283,12 +328,41 @@ export function App() {
       const [movedItem] = updated.splice(fromIndex, 1);
       updated.splice(toIndex, 0, movedItem);
 
-      // Re-assign slot labels and side mappings based on new positions 1..N
       const freshSlots = generatePageSlots(updated.length);
       return updated.map((item, idx) => ({
         ...freshSlots[idx],
         imageUrl: item.imageUrl,
       }));
+    });
+  }, []);
+
+  // Batch delete selected pages in lots of 4
+  const handleDeletePages = useCallback((indicesToDelete: number[]) => {
+    if (indicesToDelete.length === 0 || indicesToDelete.length % 4 !== 0) return;
+
+    setPages((prev) => {
+      const remaining = prev.filter((_, idx) => !indicesToDelete.includes(idx));
+      if (remaining.length < 4) return prev;
+
+      const freshSlots = generatePageSlots(remaining.length);
+      const reindexed = freshSlots.map((slot, idx) => ({
+        ...slot,
+        imageUrl: remaining[idx]?.imageUrl || null,
+      }));
+
+      setSettings((s) => {
+        const newSheets = Math.ceil(reindexed.length / 2);
+        return {
+          ...s,
+          pageCount: reindexed.length,
+          currentSpread: Math.min(newSheets, s.currentSpread ?? 0),
+        };
+      });
+
+      setExportMessage(`${indicesToDelete.length} pages supprimées avec succès !`);
+      setTimeout(() => setExportMessage(null), 3500);
+
+      return reindexed;
     });
   }, []);
 
@@ -303,8 +377,8 @@ export function App() {
     setSettings((prev) => ({
       ...prev,
       pageCount: neededPages,
-      openAngle: 90,
-      currentSpread: 1,
+      openAngle: 0,
+      currentSpread: 0,
     }));
     setPages(newPages);
   }, []);
@@ -325,8 +399,8 @@ export function App() {
       insidePaperFinish: 'matte',
       paperWeight: 350,
       paperFinish: 'matte',
-      openAngle: 90,
-      currentSpread: 1,
+      openAngle: 0,
+      currentSpread: 0,
     }));
     setPages(newPages);
   }, []);
@@ -340,8 +414,6 @@ export function App() {
     setSettings((prev) => ({
       ...prev,
       pageCount: newCount,
-      currentSpread: 1,
-      openAngle: 90,
     }));
     setPages((prev) => {
       const freshSlots = generatePageSlots(newCount);
@@ -417,14 +489,14 @@ export function App() {
   }, []);
 
   const numSheets = Math.ceil(settings.pageCount / 2);
-  const currentSpread = settings.currentSpread ?? (settings.openAngle === 0 ? 0 : 1);
+  const currentSpread = settings.currentSpread ?? 0;
 
   const canPrevPage = currentSpread > 0;
   const canNextPage = currentSpread < numSheets;
 
   const handlePrevPage = useCallback(() => {
     setSettings((prev) => {
-      const cur = prev.currentSpread ?? 1;
+      const cur = prev.currentSpread ?? 0;
       if (cur <= 0) return prev;
       const nextSpread = cur - 1;
       return {
@@ -438,13 +510,13 @@ export function App() {
   const handleNextPage = useCallback(() => {
     setSettings((prev) => {
       const numS = Math.ceil(prev.pageCount / 2);
-      const cur = prev.currentSpread ?? 1;
+      const cur = prev.currentSpread ?? 0;
       if (cur >= numS) return prev;
       const nextSpread = cur + 1;
       return {
         ...prev,
         currentSpread: nextSpread,
-        openAngle: nextSpread === numS ? 0 : Math.max(75, prev.openAngle),
+        openAngle: nextSpread === numS ? 0 : Math.max(75, prev.openAngle === 0 ? 90 : prev.openAngle),
       };
     });
   }, []);
@@ -461,6 +533,12 @@ export function App() {
     return `P. ${leftPage} — ${rightPage}`;
   }, [currentSpread, numSheets]);
 
+  const activeSpreadPage = useMemo(() => {
+    if (currentSpread === 0) return 1;
+    if (currentSpread === numSheets) return settings.pageCount;
+    return currentSpread * 2;
+  }, [currentSpread, numSheets, settings.pageCount]);
+
   const activeCommentsCount = comments.filter((c) => !c.resolved).length;
 
   return (
@@ -471,108 +549,149 @@ export function App() {
         </div>
       )}
 
-      {isClientMode ? (
-        <ClientHeader
-          settings={settings}
-          commentsCount={activeCommentsCount}
-          batApproval={batApproval}
-          onOpenFinishesModal={() => setIsFinishesModalOpen(true)}
-          onOpenCommentsModal={() => setIsCommentsModalOpen(true)}
-          onOpenBATModal={() => setIsBATModalOpen(true)}
-          onRefresh={handleRefreshFromCloud}
-          isRefreshing={isRefreshing}
-        />
+      {/* Client Loading Screen */}
+      {isClientMode && isLoadingCloud ? (
+        <div className="flex-1 flex flex-col items-center justify-center bg-dark-950 text-dark-100 gap-4 p-6 select-none">
+          <div className="w-12 h-12 rounded-2xl bg-gold-400/10 border border-gold-400/30 flex items-center justify-center text-gold-400 shadow-xl shadow-gold-500/10">
+            <RefreshCw className="w-6 h-6 animate-spin text-gold-400" />
+          </div>
+          <div className="text-center space-y-1">
+            <h2 className="text-base font-bold text-dark-50">Chargement de votre maquette 3D</h2>
+            <p className="text-xs text-dark-400">Récupération des visuels et finitions depuis le Studio Mockz...</p>
+          </div>
+        </div>
       ) : (
-        <Header
-          settings={settings}
-          commentsCount={activeCommentsCount}
-          batApproval={batApproval}
-          isSavingCloud={isSavingCloud}
-          onUpdateSettings={updateSettings}
-          onExport={handleExport}
-          onResetCamera={(preset) => threeCanvasRef.current?.resetCamera(preset)}
-          onOpenFinishesModal={() => setIsFinishesModalOpen(true)}
-          onOpenCommentsModal={() => setIsCommentsModalOpen(true)}
-          onOpenBATModal={() => setIsBATModalOpen(true)}
-          onOpenShareModal={() => setIsShareModalOpen(true)}
-          onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
-        />
+        <>
+          {isClientMode ? (
+            <ClientHeader
+              settings={settings}
+              commentsCount={activeCommentsCount}
+              batApproval={batApproval}
+              onOpenFinishesModal={() => setIsFinishesModalOpen(true)}
+              onOpenCommentsModal={() => setIsCommentsModalOpen(true)}
+              onOpenBATModal={() => setIsBATModalOpen(true)}
+              onRefresh={handleRefreshFromCloud}
+              isRefreshing={isRefreshing}
+            />
+          ) : (
+            <Header
+              settings={settings}
+              commentsCount={activeCommentsCount}
+              batApproval={batApproval}
+              isSavingCloud={isSavingCloud}
+              onUpdateSettings={updateSettings}
+              onExport={handleExport}
+              onResetCamera={(preset) => threeCanvasRef.current?.resetCamera(preset)}
+              onOpenFinishesModal={() => setIsFinishesModalOpen(true)}
+              onOpenCommentsModal={() => setIsCommentsModalOpen(true)}
+              onOpenBATModal={() => setIsBATModalOpen(true)}
+              onOpenShareModal={handleOpenShareModal}
+              onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
+            />
+          )}
+
+          <div className="flex-1 flex overflow-hidden relative">
+            {!isClientMode && (
+              <Sidebar
+                settings={settings}
+                pages={pages}
+                isOpen={sidebarOpen}
+                onClose={() => setSidebarOpen(false)}
+                onUpdateSettings={updateSettings}
+                onUpdatePageImage={handleUpdatePageImage}
+                onApplyPdfPages={handleApplyPdfPages}
+                onLoadSampleDesign={handleLoadSampleDesign}
+                onResetProject={handleResetProject}
+                onPageCountChange={handlePageCountChange}
+                onReorderPage={handleReorderPage}
+                onDeletePages={handleDeletePages}
+              />
+            )}
+
+            <main className="flex-1 relative h-full">
+              <ThreeCanvas
+                ref={threeCanvasRef}
+                settings={settings}
+                pages={pages}
+              />
+
+              <ControlsOverlay
+                settings={settings}
+                onUpdateSettings={updateSettings}
+                onPrevPage={handlePrevPage}
+                onNextPage={handleNextPage}
+                canPrevPage={canPrevPage}
+                canNextPage={canNextPage}
+                currentSpreadLabel={currentSpreadLabel}
+              />
+
+              {/* Floating Bottom-Right Action Button (FAB) for Collapsible Comments Panel */}
+              <button
+                type="button"
+                onClick={() => setIsCommentsModalOpen((prev) => !prev)}
+                className={`absolute bottom-6 right-6 z-40 p-3 sm:px-4 sm:py-3 rounded-2xl shadow-2xl flex items-center gap-2.5 font-bold text-xs transition-all active:scale-95 border ${
+                  isCommentsModalOpen
+                    ? 'bg-dark-800 text-gold-400 border-gold-400/40 shadow-black'
+                    : 'bg-gold-400 hover:bg-gold-300 text-dark-950 border-gold-300 shadow-gold-500/20 hover:scale-105'
+                }`}
+                title={isCommentsModalOpen ? 'Masquer les remarques' : 'Ouvrir les remarques & annotations'}
+              >
+                <MessageSquare className="w-4 h-4 sm:w-4.5 sm:h-4.5 flex-shrink-0" />
+                <span className="hidden sm:inline">
+                  {isCommentsModalOpen ? 'Fermer' : 'Commentaires'}
+                </span>
+                {activeCommentsCount > 0 && (
+                  <span className="w-5 h-5 rounded-full bg-dark-950 text-gold-400 font-mono text-[10px] font-bold flex items-center justify-center border border-gold-400/30">
+                    {activeCommentsCount}
+                  </span>
+                )}
+              </button>
+            </main>
+          </div>
+
+          <PrintFinishesModal
+            isOpen={isFinishesModalOpen}
+            onClose={() => setIsFinishesModalOpen(false)}
+            settings={settings}
+            onUpdateSettings={updateSettings}
+          />
+
+          {/* Collapsible Comments Side Panel Drawer */}
+          <ClientCommentsModal
+            isOpen={isCommentsModalOpen}
+            onClose={() => setIsCommentsModalOpen(false)}
+            comments={comments}
+            pages={pages}
+            onAddComment={handleAddComment}
+            onAddReply={handleAddReply}
+            onDeleteComment={handleDeleteComment}
+            onToggleResolveComment={handleToggleResolveComment}
+            isClientMode={isClientMode}
+            activeSpreadPage={activeSpreadPage}
+          />
+
+          <BATApprovalModal
+            isOpen={isBATModalOpen}
+            onClose={() => setIsBATModalOpen(false)}
+            settings={settings}
+            batApproval={batApproval}
+            onSaveBAT={handleSaveBAT}
+          />
+
+          <ShareModal
+            isOpen={isShareModalOpen}
+            onClose={() => setIsShareModalOpen(false)}
+            settings={settings}
+            projectId={projectId}
+            onSwitchToClientMode={() => {
+              const url = new URL(window.location.href);
+              url.searchParams.set('view', 'client');
+              url.searchParams.set('p', projectId);
+              window.location.href = url.toString();
+            }}
+          />
+        </>
       )}
-
-      <div className="flex-1 flex overflow-hidden relative">
-        {!isClientMode && (
-          <Sidebar
-            settings={settings}
-            pages={pages}
-            isOpen={sidebarOpen}
-            onClose={() => setSidebarOpen(false)}
-            onUpdateSettings={updateSettings}
-            onUpdatePageImage={handleUpdatePageImage}
-            onApplyPdfPages={handleApplyPdfPages}
-            onLoadSampleDesign={handleLoadSampleDesign}
-            onResetProject={handleResetProject}
-            onPageCountChange={handlePageCountChange}
-            onReorderPage={handleReorderPage}
-          />
-        )}
-
-        <main className="flex-1 relative h-full">
-          <ThreeCanvas
-            ref={threeCanvasRef}
-            settings={settings}
-            pages={pages}
-          />
-          <ControlsOverlay
-            settings={settings}
-            onUpdateSettings={updateSettings}
-            onPrevPage={handlePrevPage}
-            onNextPage={handleNextPage}
-            canPrevPage={canPrevPage}
-            canNextPage={canNextPage}
-            currentSpreadLabel={currentSpreadLabel}
-          />
-        </main>
-      </div>
-
-      <PrintFinishesModal
-        isOpen={isFinishesModalOpen}
-        onClose={() => setIsFinishesModalOpen(false)}
-        settings={settings}
-        onUpdateSettings={updateSettings}
-      />
-
-      <ClientCommentsModal
-        isOpen={isCommentsModalOpen}
-        onClose={() => setIsCommentsModalOpen(false)}
-        comments={comments}
-        pages={pages}
-        onAddComment={handleAddComment}
-        onAddReply={handleAddReply}
-        onDeleteComment={handleDeleteComment}
-        onToggleResolveComment={handleToggleResolveComment}
-        isClientMode={isClientMode}
-      />
-
-      <BATApprovalModal
-        isOpen={isBATModalOpen}
-        onClose={() => setIsBATModalOpen(false)}
-        settings={settings}
-        batApproval={batApproval}
-        onSaveBAT={handleSaveBAT}
-      />
-
-      <ShareModal
-        isOpen={isShareModalOpen}
-        onClose={() => setIsShareModalOpen(false)}
-        settings={settings}
-        projectId={projectId}
-        onSwitchToClientMode={() => {
-          const url = new URL(window.location.href);
-          url.searchParams.set('view', 'client');
-          url.searchParams.set('p', projectId);
-          window.location.href = url.toString();
-        }}
-      />
     </div>
   );
 }

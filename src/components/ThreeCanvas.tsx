@@ -47,7 +47,7 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(
         if (preset === 'perspective') {
           camera.position.set(dist * 0.7, dist * 0.65, dist * 1.1);
         } else if (preset === 'front') {
-          camera.position.set(0, 0, dist * 1.4);
+          camera.position.set(0, 0, dist * 1.0);
         } else if (preset === 'top') {
           camera.position.set(0, dist * 1.6, 0.01);
         } else if (preset === 'spine') {
@@ -80,7 +80,8 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(
         100
       );
       const d0 = Math.max(dims.width, dims.height) * 2.4;
-      camera.position.set(d0 * 0.7, d0 * 0.65, d0 * 1.1);
+      // Centered front-face view, nicely zoomed in to occupy viewport
+      camera.position.set(0, 0, d0 * 1.0);
       cameraRef.current = camera;
 
       // Renderer

@@ -10,7 +10,10 @@ import {
   X,
   ChevronUp,
   ChevronDown,
-  GripVertical
+  GripVertical,
+  CheckSquare,
+  Square,
+  AlertCircle
 } from 'lucide-react';
 import { PageSlot, BookSettings } from '../types';
 import { convertPdfToImages } from '../utils/pdfProcessor';
@@ -27,6 +30,7 @@ interface SidebarProps {
   onResetProject: () => void;
   onPageCountChange: (count: number) => void;
   onReorderPage: (fromIndex: number, toIndex: number) => void;
+  onDeletePages: (indices: number[]) => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -40,12 +44,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onResetProject,
   onPageCountChange,
   onReorderPage,
+  onDeletePages,
 }) => {
   const [isConvertingPdf, setIsConvertingPdf] = useState(false);
   const [conversionProgress, setConversionProgress] = useState({ current: 0, total: 0 });
   const [dragOverGlobal, setDragOverGlobal] = useState(false);
   const [draggedCardIndex, setDraggedCardIndex] = useState<number | null>(null);
   const [dragOverCardIndex, setDragOverCardIndex] = useState<number | null>(null);
+  const [selectedIndices, setSelectedIndices] = useState<number[]>([]);
   const pdfInputRef = useRef<HTMLInputElement>(null);
   const pageInputRefs = useRef<{ [key: number]: HTMLInputElement | null }>({});
 
@@ -64,6 +70,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       });
 
       onApplyPdfPages(result.pages);
+      setSelectedIndices([]);
     } catch (err) {
       console.error('Erreur lors de la conversion du PDF:', err);
       alert('Impossible de lire ce fichier PDF. Vérifiez qu\'il n\'est pas corrompu ou protégé par mot de passe.');
@@ -117,6 +124,34 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   };
 
+  // Selection handlers
+  const toggleSelectPage = (idx: number) => {
+    setSelectedIndices((prev) =>
+      prev.includes(idx) ? prev.filter((i) => i !== idx) : [...prev, idx]
+    );
+  };
+
+  const clearSelection = () => {
+    setSelectedIndices([]);
+  };
+
+  const selectedCount = selectedIndices.length;
+  const isMultipleOf4 = selectedCount > 0 && selectedCount % 4 === 0;
+  const canDelete = isMultipleOf4 && pages.length - selectedCount >= 4;
+  const neededTo4 = 4 - (selectedCount % 4);
+
+  const handleDeleteSelected = () => {
+    if (!canDelete) return;
+    if (
+      confirm(
+        `Supprimer définitivement ces ${selectedCount} pages ? La numérotation sera réajustée.`
+      )
+    ) {
+      onDeletePages(selectedIndices);
+      setSelectedIndices([]);
+    }
+  };
+
   return (
     <>
       {/* Mobile backdrop */}
@@ -152,6 +187,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 onClick={() => {
                   if (confirm('Réinitialiser le projet ? Toutes les pages seront vidées.')) {
                     onResetProject();
+                    setSelectedIndices([]);
                   }
                 }}
                 className="p-1.5 rounded-lg text-dark-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
@@ -206,7 +242,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <div className="py-2 flex flex-col items-center gap-2">
                 <div className="w-6 h-6 border-2 border-gold-400 border-t-transparent rounded-full animate-spin" />
                 <div className="text-xs font-semibold text-dark-100">
-                  Conversion du PDF en 2K...
+                  Conversion du PDF en haute fidélité...
                 </div>
                 <div className="text-[11px] text-dark-400">
                   Page {conversionProgress.current} sur {conversionProgress.total}
@@ -243,7 +279,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div className="mt-2.5 flex items-center justify-between">
             <span className="text-[11px] text-dark-400">Pas de PDF sous la main ?</span>
             <button
-              onClick={onLoadSampleDesign}
+              onClick={() => {
+                onLoadSampleDesign();
+                setSelectedIndices([]);
+              }}
               className="text-[11px] font-semibold text-gold-400 hover:text-gold-300 flex items-center gap-1 transition-colors"
             >
               <Sparkles className="w-3 h-3 text-gold-400" />
@@ -253,7 +292,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         {/* Page Count Configuration: -4 / +4 Stepper */}
-        <div className="px-4 py-3 border-b border-dark-700/60 bg-dark-850/60 flex items-center justify-between">
+        <div className="px-4 py-2.5 border-b border-dark-700/60 bg-dark-850/60 flex items-center justify-between">
           <div>
             <span className="text-xs text-dark-200 font-semibold block">Nombre de volets</span>
             <span className="text-[10px] text-dark-400">
@@ -288,12 +327,64 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
 
+        {/* Batch Selection Bar (Appears when pages are selected) */}
+        {selectedCount > 0 && (
+          <div className="p-3 bg-dark-850 border-b border-dark-700/80 space-y-2 animate-in fade-in duration-200">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-semibold text-dark-200 flex items-center gap-1.5">
+                <CheckSquare className="w-3.5 h-3.5 text-gold-400" />
+                <span><strong>{selectedCount}</strong> page(s) sélectionnée(s)</span>
+              </span>
+              <button
+                type="button"
+                onClick={clearSelection}
+                className="text-[11px] text-dark-400 hover:text-dark-200 underline"
+              >
+                Désélectionner
+              </button>
+            </div>
+
+            {/* Validation & Delete Button */}
+            <div className="flex flex-col gap-1.5">
+              {canDelete ? (
+                <button
+                  type="button"
+                  onClick={handleDeleteSelected}
+                  className="w-full py-2 px-3 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-500 text-white flex items-center justify-center gap-1.5 shadow-md shadow-red-900/30 transition-all active:scale-98"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Supprimer les {selectedCount} pages (lot de 4)</span>
+                </button>
+              ) : (
+                <div className="p-2 rounded-xl bg-dark-900 border border-dark-750 text-[11px] text-dark-400 flex items-start gap-1.5">
+                  <AlertCircle className="w-3.5 h-3.5 text-amber-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    {pages.length - selectedCount < 4 ? (
+                      <span className="text-amber-300">
+                        Le document doit conserver au minimum 4 pages.
+                      </span>
+                    ) : (
+                      <span>
+                        Suppression par <strong>lot de 4</strong> obligatoire (pli d'imprimerie).{' '}
+                        <strong className="text-gold-400">
+                          Sélectionnez encore {neededTo4} page(s)
+                        </strong>.
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Pages List */}
         <div className="flex-1 overflow-y-auto p-3.5 space-y-2.5 custom-scrollbar">
           {pages.map((page, idx) => {
             const hasImage = !!page.imageUrl;
             const isDragging = draggedCardIndex === idx;
             const isDragOver = dragOverCardIndex === idx;
+            const isSelected = selectedIndices.includes(idx);
 
             return (
               <div
@@ -314,13 +405,33 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 } ${
                   isDragOver ? 'ring-2 ring-gold-400 border-gold-400 bg-gold-400/10' : ''
                 } ${
-                  hasImage
+                  isSelected
+                    ? 'border-gold-400/80 bg-gold-400/5 ring-1 ring-gold-400/30'
+                    : hasImage
                     ? 'border-dark-700/80 bg-dark-800/80 hover:border-gold-400/40'
                     : 'border-dark-750/60 bg-dark-850/40 hover:border-dark-600'
                 }`}
               >
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
+                    {/* Checkbox for batch selection */}
+                    <button
+                      type="button"
+                      onClick={() => toggleSelectPage(idx)}
+                      className={`p-0.5 rounded transition-colors ${
+                        isSelected
+                          ? 'text-gold-400'
+                          : 'text-dark-500 hover:text-dark-300'
+                      }`}
+                      title={isSelected ? 'Désélectionner cette page' : 'Sélectionner pour suppression'}
+                    >
+                      {isSelected ? (
+                        <CheckSquare className="w-4 h-4 text-gold-400" />
+                      ) : (
+                        <Square className="w-4 h-4 text-dark-500" />
+                      )}
+                    </button>
+
                     <div
                       className="cursor-grab active:cursor-grabbing text-dark-500 hover:text-gold-400 p-0.5 transition-colors"
                       title="Glisser-déposer pour réordonner"

@@ -1,19 +1,15 @@
 import React, { useState } from 'react';
 import {
-  X,
   MessageSquare,
-  Plus,
   Trash2,
   CheckCircle2,
   Copy,
   Check,
-  Download,
-  Upload,
-  User,
-  Clock,
   CornerDownRight,
   Send,
-  CheckCheck
+  CheckCheck,
+  Filter,
+  ChevronRight
 } from 'lucide-react';
 import { ClientComment, PageSlot } from '../types';
 
@@ -27,6 +23,7 @@ interface ClientCommentsModalProps {
   onDeleteComment?: (id: string) => void;
   onToggleResolveComment?: (id: string) => void;
   isClientMode: boolean;
+  activeSpreadPage?: number | null;
 }
 
 export const ClientCommentsModal: React.FC<ClientCommentsModalProps> = ({
@@ -39,6 +36,7 @@ export const ClientCommentsModal: React.FC<ClientCommentsModalProps> = ({
   onDeleteComment,
   onToggleResolveComment,
   isClientMode,
+  activeSpreadPage,
 }) => {
   const [selectedPage, setSelectedPage] = useState<number | 'all'>('all');
   const [authorName, setAuthorName] = useState(() => {
@@ -46,15 +44,12 @@ export const ClientCommentsModal: React.FC<ClientCommentsModalProps> = ({
   });
   const [commentText, setCommentText] = useState('');
   const [filterPage, setFilterPage] = useState<number | 'all'>('all');
+  const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'resolved'>('all');
   const [copied, setCopied] = useState(false);
-  const [showImportBox, setShowImportBox] = useState(false);
-  const [importText, setImportText] = useState('');
 
   // Replying state (for studio)
   const [replyingCommentId, setReplyingCommentId] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
-
-  if (!isOpen) return null;
 
   const quickTags = [
     'Correction texte',
@@ -95,8 +90,10 @@ export const ClientCommentsModal: React.FC<ClientCommentsModalProps> = ({
   };
 
   const filteredComments = comments.filter((c) => {
-    if (filterPage === 'all') return true;
-    return c.pageIndex === filterPage;
+    if (filterPage !== 'all' && c.pageIndex !== filterPage) return false;
+    if (filterStatus === 'pending' && c.resolved) return false;
+    if (filterStatus === 'resolved' && !c.resolved) return false;
+    return true;
   });
 
   const getFormattedSummary = () => {
@@ -130,466 +127,380 @@ export const ClientCommentsModal: React.FC<ClientCommentsModalProps> = ({
     setTimeout(() => setCopied(false), 2500);
   };
 
-  const handleDownloadSummary = () => {
-    const element = document.createElement('a');
-    const file = new Blob([getFormattedSummary()], { type: 'text/plain;charset=utf-8' });
-    element.href = URL.createObjectURL(file);
-    element.download = `Retours_Mockz_${Date.now()}.txt`;
-    document.body.appendChild(element);
-    element.click();
-    document.body.removeChild(element);
-  };
-
-  const handleImportText = () => {
-    if (!importText.trim()) return;
-    try {
-      if (importText.trim().startsWith('[') || importText.trim().startsWith('{')) {
-        const parsed = JSON.parse(importText);
-        const list = Array.isArray(parsed) ? parsed : [parsed];
-        list.forEach((item: any) => {
-          if (item.text) {
-            onAddComment({
-              pageIndex: item.pageIndex ?? 'all',
-              author: item.author || 'Client',
-              text: item.text,
-              resolved: !!item.resolved,
-            });
-          }
-        });
-      } else {
-        const lines = importText.split('\n').filter((l) => l.trim().length > 0);
-        lines.forEach((line) => {
-          onAddComment({
-            pageIndex: 'all',
-            author: 'Client',
-            text: line.trim(),
-            resolved: false,
-          });
-        });
-      }
-      setImportText('');
-      setShowImportBox(false);
-    } catch {
-      alert('Format invalide. Veuillez coller une liste de retours ou du JSON.');
-    }
-  };
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-md select-none animate-in fade-in duration-200">
-      <div className="bg-dark-900 border border-dark-700/80 rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl shadow-black flex flex-col max-h-[90vh]">
-        {/* Header */}
-        <div className="p-4 sm:p-5 border-b border-dark-700/60 flex items-center justify-between bg-dark-900">
+    <>
+      {/* Mobile-only backdrop (allows clicking outside to collapse on small screens) */}
+      <div
+        className={`fixed inset-0 bg-black/40 backdrop-blur-xs z-40 lg:hidden transition-opacity duration-300 ${
+          isOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+        }`}
+        onClick={onClose}
+      />
+
+      {/* Collapsible Side Panel Drawer */}
+      <aside
+        className={`fixed top-0 bottom-0 right-0 z-50 w-full sm:w-[420px] md:w-[460px] bg-dark-900/98 backdrop-blur-2xl border-l border-dark-700/80 shadow-2xl shadow-black flex flex-col select-none transition-transform duration-300 ease-in-out ${
+          isOpen ? 'translate-x-0' : 'translate-x-full'
+        }`}
+      >
+        {/* Panel Header */}
+        <div className="p-4 sm:p-5 border-b border-dark-700/60 flex items-center justify-between bg-dark-900/90">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-gold-400/10 text-gold-400 flex items-center justify-center border border-gold-400/20">
-              <MessageSquare className="w-5 h-5 text-gold-400" />
+            <div className="w-8 h-8 rounded-xl bg-gold-400/10 text-gold-400 flex items-center justify-center border border-gold-400/20">
+              <MessageSquare className="w-4 h-4 text-gold-400" />
             </div>
             <div>
-              <h3 className="font-bold text-base text-dark-50 flex items-center gap-2">
-                <span>{isClientMode ? 'Vos Retours & Remarques' : 'Retours & Échanges Client'}</span>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-dark-800 text-gold-400 border border-dark-700/80">
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-sm sm:text-base text-dark-50">
+                  Commentaires &amp; Remarques
+                </h3>
+                <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-gold-400/15 text-gold-400 border border-gold-400/25">
                   {comments.length}
                 </span>
-              </h3>
-              <p className="text-xs text-dark-400">
-                {isClientMode
-                  ? 'Notez vos observations page par page pour le graphiste'
-                  : 'Consultez les demandes du client, répondez et validez les corrections'}
+              </div>
+              <p className="text-[11px] text-dark-400">
+                {isClientMode ? 'Partagez vos retours par page avec le studio' : 'Consultez et répondez aux demandes du client'}
               </p>
             </div>
           </div>
+
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-dark-400 hover:text-dark-100 hover:bg-dark-800 transition-colors"
+            className="p-1.5 rounded-xl text-dark-400 hover:text-dark-100 hover:bg-dark-800 transition-colors"
+            title="Masquer le volet de commentaires"
           >
-            <X className="w-5 h-5" />
+            <ChevronRight className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Content */}
-        <div className="p-4 sm:p-6 overflow-y-auto space-y-5 custom-scrollbar flex-1">
-          {/* Form to Add Comment */}
+        {/* Panel Scrollable Content */}
+        <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4 custom-scrollbar">
+          
+          {/* Quick page contextual action */}
+          {activeSpreadPage && (
+            <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-dark-850 border border-dark-750 text-xs">
+              <span className="text-dark-300">
+                Page vue : <strong className="text-gold-400">Page {activeSpreadPage}</strong>
+              </span>
+              <button
+                type="button"
+                onClick={() => setSelectedPage(activeSpreadPage)}
+                className="text-[11px] font-bold text-gold-400 hover:text-gold-300 underline"
+              >
+                Commenter cette page
+              </button>
+            </div>
+          )}
+
+          {/* New Comment Form */}
           <form
             onSubmit={handleSubmitComment}
-            className="bg-dark-850/80 rounded-xl p-4 border border-dark-700/70 space-y-3"
+            className="bg-dark-850/80 border border-dark-700/60 rounded-2xl p-4 space-y-3"
           >
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold uppercase tracking-wider text-gold-400 flex items-center gap-1.5">
-                <Plus className="w-3.5 h-3.5" />
-                <span>{isClientMode ? 'Ajouter une remarque' : 'Ajouter une note / consigne'}</span>
+              <span className="text-xs font-bold text-dark-100 uppercase tracking-wider">
+                Nouvelle remarque
               </span>
-              <div className="flex items-center gap-2">
-                <User className="w-3.5 h-3.5 text-dark-400" />
+              <span className="text-[10px] text-dark-400">
+                {isClientMode ? 'Client' : 'Studio'}
+              </span>
+            </div>
+
+            {/* Target Page Selector & Author */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div>
+                <label className="text-[10px] font-semibold text-dark-400 block mb-1">
+                  Page concernée
+                </label>
+                <select
+                  value={selectedPage}
+                  onChange={(e) =>
+                    setSelectedPage(e.target.value === 'all' ? 'all' : Number(e.target.value))
+                  }
+                  className="w-full bg-dark-900 border border-dark-700/80 rounded-xl px-2.5 py-1.5 text-xs text-dark-200 focus:outline-none focus:border-gold-400"
+                >
+                  <option value="all">Remarque Générale (tout le projet)</option>
+                  {pages.map((p) => (
+                    <option key={p.index} value={p.index}>
+                      P. {p.index} • {p.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-semibold text-dark-400 block mb-1">
+                  Votre nom
+                </label>
                 <input
                   type="text"
                   value={authorName}
                   onChange={(e) => setAuthorName(e.target.value)}
-                  placeholder="Votre nom"
-                  className="bg-dark-800 text-[11px] px-2.5 py-1 rounded-lg border border-dark-700 text-dark-100 focus:outline-none focus:border-gold-400 w-28 sm:w-36"
+                  placeholder="Ex: Sophie M."
+                  className="w-full bg-dark-900 border border-dark-700/80 rounded-xl px-2.5 py-1.5 text-xs text-dark-200 focus:outline-none focus:border-gold-400"
                 />
               </div>
             </div>
 
-            {/* Target Page Selection */}
-            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-              <label className="text-xs text-dark-300 font-medium whitespace-nowrap">
-                Concerne la page :
-              </label>
-              <select
-                value={selectedPage}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setSelectedPage(val === 'all' ? 'all' : parseInt(val, 10));
-                }}
-                className="bg-dark-800 border border-dark-700/80 text-dark-100 text-xs rounded-xl px-3 py-1.5 focus:outline-none focus:border-gold-400 flex-1"
-              >
-                <option value="all">Remarque Générale (Tout le livret)</option>
-                {pages.map((p) => (
-                  <option key={p.index} value={p.index}>
-                    Page {p.index} • {p.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
             {/* Quick tags */}
-            {isClientMode && (
-              <div className="flex flex-wrap gap-1.5 pt-1">
+            <div>
+              <span className="text-[10px] text-dark-400 block mb-1">Balises rapides :</span>
+              <div className="flex flex-wrap gap-1">
                 {quickTags.map((tag) => (
                   <button
-                    type="button"
                     key={tag}
+                    type="button"
                     onClick={() => handleQuickTagClick(tag)}
-                    className="text-[10px] px-2 py-0.5 rounded-full bg-dark-800 hover:bg-dark-750 text-dark-300 hover:text-gold-400 border border-dark-700/60 transition-colors"
+                    className="text-[10px] px-2 py-0.5 rounded-lg bg-dark-800 hover:bg-dark-750 text-dark-300 hover:text-gold-400 border border-dark-700/60 transition-colors"
                   >
                     +{tag}
                   </button>
                 ))}
               </div>
-            )}
+            </div>
 
-            {/* Textarea */}
+            {/* Comment Textarea */}
             <div>
               <textarea
-                rows={2}
-                required
                 value={commentText}
                 onChange={(e) => setCommentText(e.target.value)}
-                placeholder={
-                  isClientMode
-                    ? "Ex: Corriger la date en page 3, ajuster le logo un peu plus haut..."
-                    : "Ex: Note technique ou remarque interne pour le projet..."
-                }
-                className="w-full bg-dark-800 border border-dark-700/80 rounded-xl px-3 py-2 text-xs text-dark-100 placeholder-dark-500 focus:outline-none focus:border-gold-400 resize-none"
+                placeholder="Décrivez précisément votre remarque ou la modification souhaitée..."
+                rows={3}
+                className="w-full bg-dark-900 border border-dark-700/80 rounded-xl p-3 text-xs text-dark-100 placeholder-dark-500 focus:outline-none focus:border-gold-400 resize-none"
               />
             </div>
 
-            {/* Submit */}
-            <div className="flex justify-end">
-              <button
-                type="submit"
-                disabled={!commentText.trim()}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-gold-400 hover:bg-gold-300 disabled:opacity-40 disabled:pointer-events-none text-dark-950 transition-all shadow-md shadow-gold-500/20 active:scale-95"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Publier la remarque</span>
-              </button>
-            </div>
+            <button
+              type="submit"
+              disabled={!commentText.trim()}
+              className="w-full py-2 px-3 rounded-xl text-xs font-bold bg-gold-400 hover:bg-gold-300 text-dark-950 flex items-center justify-center gap-1.5 transition-all disabled:opacity-30 disabled:pointer-events-none shadow-sm"
+            >
+              <Send className="w-3.5 h-3.5" />
+              <span>Publier la remarque</span>
+            </button>
           </form>
 
-          {/* Filter Bar & Export Actions */}
-          <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-dark-750">
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-dark-400">Filtrer :</span>
+          {/* Filters & Status tabs */}
+          <div className="flex items-center justify-between pt-1">
+            <div className="flex items-center gap-1 bg-dark-850 p-1 rounded-xl border border-dark-750 text-xs">
+              <button
+                type="button"
+                onClick={() => setFilterStatus('all')}
+                className={`px-2 py-1 rounded-lg text-[11px] font-semibold transition-colors ${
+                  filterStatus === 'all'
+                    ? 'bg-gold-400 text-dark-950 shadow-sm'
+                    : 'text-dark-400 hover:text-dark-200'
+                }`}
+              >
+                Tous ({comments.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilterStatus('pending')}
+                className={`px-2 py-1 rounded-lg text-[11px] font-semibold transition-colors ${
+                  filterStatus === 'pending'
+                    ? 'bg-amber-400 text-dark-950 shadow-sm'
+                    : 'text-dark-400 hover:text-dark-200'
+                }`}
+              >
+                À corriger ({comments.filter((c) => !c.resolved).length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilterStatus('resolved')}
+                className={`px-2 py-1 rounded-lg text-[11px] font-semibold transition-colors ${
+                  filterStatus === 'resolved'
+                    ? 'bg-emerald-400 text-dark-950 shadow-sm'
+                    : 'text-dark-400 hover:text-dark-200'
+                }`}
+              >
+                Validés ({comments.filter((c) => c.resolved).length})
+              </button>
+            </div>
+
+            {/* Filter by page */}
+            <div className="flex items-center gap-1">
+              <Filter className="w-3.5 h-3.5 text-dark-400" />
               <select
                 value={filterPage}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setFilterPage(val === 'all' ? 'all' : parseInt(val, 10));
-                }}
-                className="bg-dark-800 text-[11px] text-dark-200 border border-dark-700 rounded-lg px-2 py-1 focus:outline-none"
+                onChange={(e) =>
+                  setFilterPage(e.target.value === 'all' ? 'all' : Number(e.target.value))
+                }
+                className="bg-dark-850 border border-dark-750 rounded-lg px-2 py-1 text-[11px] text-dark-300 focus:outline-none"
               >
-                <option value="all">Toutes ({comments.length})</option>
-                {pages.map((p) => {
-                  const pageCount = comments.filter((c) => c.pageIndex === p.index).length;
-                  if (pageCount === 0) return null;
-                  return (
-                    <option key={p.index} value={p.index}>
-                      P. {p.index} ({pageCount})
-                    </option>
-                  );
-                })}
+                <option value="all">Toutes pages</option>
+                {pages.map((p) => (
+                  <option key={p.index} value={p.index}>
+                    P.{p.index}
+                  </option>
+                ))}
               </select>
             </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleCopySummary}
-                className="flex items-center gap-1 text-[11px] font-semibold text-dark-300 hover:text-gold-400 bg-dark-800 hover:bg-dark-750 px-2.5 py-1 rounded-lg border border-dark-700 transition-colors"
-                title="Copier le récapitulatif des retours"
-              >
-                {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                <span>{copied ? 'Copié !' : 'Copier'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleDownloadSummary}
-                className="flex items-center gap-1 text-[11px] font-semibold text-dark-300 hover:text-gold-400 bg-dark-800 hover:bg-dark-750 px-2.5 py-1 rounded-lg border border-dark-700 transition-colors"
-                title="Télécharger en fichier texte"
-              >
-                <Download className="w-3 h-3" />
-                <span>Télécharger</span>
-              </button>
-
-              {!isClientMode && (
-                <button
-                  type="button"
-                  onClick={() => setShowImportBox(!showImportBox)}
-                  className="flex items-center gap-1 text-[11px] font-semibold text-dark-300 hover:text-gold-400 bg-dark-800 hover:bg-dark-750 px-2.5 py-1 rounded-lg border border-dark-700 transition-colors"
-                  title="Importer des retours reçus"
-                >
-                  <Upload className="w-3 h-3" />
-                  <span>Importer</span>
-                </button>
-              )}
-            </div>
           </div>
-
-          {/* Import Box in Studio Mode */}
-          {showImportBox && !isClientMode && (
-            <div className="p-3 bg-dark-800/90 rounded-xl border border-dark-700 space-y-2">
-              <span className="text-xs font-semibold text-dark-200 block">
-                Coller des retours reçus du client :
-              </span>
-              <textarea
-                rows={3}
-                value={importText}
-                onChange={(e) => setImportText(e.target.value)}
-                placeholder="Collez ici les retours du client (liste à puces ou texte)..."
-                className="w-full bg-dark-900 border border-dark-700 text-xs p-2 rounded-lg text-dark-100"
-              />
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowImportBox(false)}
-                  className="px-3 py-1 rounded-lg text-xs text-dark-400 hover:bg-dark-750"
-                >
-                  Fermer
-                </button>
-                <button
-                  type="button"
-                  onClick={handleImportText}
-                  className="px-3 py-1 rounded-lg text-xs font-bold bg-gold-400 text-dark-950 hover:bg-gold-300"
-                >
-                  Valider l'import
-                </button>
-              </div>
-            </div>
-          )}
 
           {/* Comments List */}
           <div className="space-y-3">
             {filteredComments.length === 0 ? (
-              <div className="text-center py-8 text-dark-400 space-y-2">
-                <MessageSquare className="w-8 h-8 mx-auto opacity-30" />
-                <p className="text-xs">Aucune remarque enregistrée pour le moment.</p>
-                <p className="text-[11px] text-dark-500">
-                  {isClientMode
-                    ? "Vos remarques apparaîtront ici et seront transmises au graphiste."
-                    : "Les retours laissés par votre client s'afficheront ici en direct."}
+              <div className="text-center py-8 px-4 rounded-2xl bg-dark-850/50 border border-dark-750/50">
+                <MessageSquare className="w-8 h-8 text-dark-600 mx-auto mb-2 opacity-50" />
+                <p className="text-xs font-semibold text-dark-300">Aucun commentaire dans cette vue</p>
+                <p className="text-[11px] text-dark-500 mt-1">
+                  Les remarques ajoutées apparaîtront ici avec les réponses du studio.
                 </p>
               </div>
             ) : (
               filteredComments.map((comment) => {
-                const targetPageSlot =
-                  comment.pageIndex !== 'all'
-                    ? pages.find((p) => p.index === comment.pageIndex)
-                    : null;
-
-                const hasReplies = comment.replies && comment.replies.length > 0;
-                const isReplyingThis = replyingCommentId === comment.id;
+                const targetPage =
+                  comment.pageIndex === 'all'
+                    ? null
+                    : pages.find((p) => p.index === comment.pageIndex);
 
                 return (
                   <div
                     key={comment.id}
-                    className={`p-3.5 rounded-xl border transition-all ${
+                    className={`p-3.5 rounded-2xl border transition-all ${
                       comment.resolved
-                        ? 'bg-dark-850/50 border-emerald-500/25'
-                        : 'bg-dark-800/80 border-dark-700/80'
+                        ? 'border-emerald-500/20 bg-dark-850/50 opacity-80'
+                        : 'border-dark-700/80 bg-dark-850/90 shadow-md'
                     }`}
                   >
-                    {/* Comment Header */}
-                    <div className="flex items-center justify-between gap-2 mb-2">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span
-                          className={`text-[10px] font-bold px-2 py-0.5 rounded-md border font-mono ${
-                            comment.pageIndex === 'all'
-                              ? 'bg-purple-500/10 text-purple-400 border-purple-500/25'
-                              : 'bg-gold-400/10 text-gold-400 border-gold-400/25'
-                          }`}
-                        >
-                          {comment.pageIndex === 'all'
-                            ? 'Global'
-                            : `Page ${comment.pageIndex}${targetPageSlot ? ` • ${targetPageSlot.label}` : ''}`}
+                    {/* Top row: Page badge & Status */}
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-dark-750 text-gold-400 border border-dark-700 font-mono">
+                          {targetPage ? `Page ${comment.pageIndex}` : 'Général'}
                         </span>
-
-                        <span className="text-xs font-semibold text-dark-100">
-                          {comment.author}
-                        </span>
-
-                        <span className="text-[10px] text-dark-500 flex items-center gap-1 font-mono">
-                          <Clock className="w-3 h-3" />
-                          {new Date(comment.createdAt).toLocaleTimeString([], {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
-                        </span>
+                        {targetPage && (
+                          <span className="text-[10px] text-dark-400 truncate max-w-[140px]">
+                            {targetPage.label}
+                          </span>
+                        )}
                       </div>
 
-                      {/* Status & Actions depending on role */}
+                      {/* Status / Role-based action */}
                       <div className="flex items-center gap-1.5">
-                        {isClientMode ? (
-                          /* Client View: READ-ONLY STATUS BADGE (No delete, no resolve button) */
+                        {!isClientMode && onToggleResolveComment ? (
+                          <button
+                            type="button"
+                            onClick={() => onToggleResolveComment(comment.id)}
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1 border transition-colors ${
+                              comment.resolved
+                                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/30'
+                                : 'bg-amber-500/15 text-amber-400 border-amber-500/30 hover:bg-amber-500/25'
+                            }`}
+                            title="Changer le statut"
+                          >
+                            <CheckCheck className="w-3 h-3" />
+                            <span>{comment.resolved ? 'Validée' : 'Marquer comme fait'}</span>
+                          </button>
+                        ) : (
                           <span
-                            className={`px-2 py-0.5 rounded-md text-[10px] font-semibold flex items-center gap-1 border ${
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1 border ${
                               comment.resolved
                                 ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25'
-                                : 'bg-dark-750 text-dark-400 border-dark-700'
+                                : 'bg-amber-500/15 text-amber-400 border-amber-500/25'
                             }`}
                           >
-                            {comment.resolved ? (
-                              <>
-                                <CheckCheck className="w-3 h-3 text-emerald-400" />
-                                <span>Traité par le studio</span>
-                              </>
-                            ) : (
-                              <>
-                                <Clock className="w-3 h-3 text-dark-400" />
-                                <span>En cours d'examen</span>
-                              </>
-                            )}
+                            <CheckCircle2 className="w-3 h-3" />
+                            <span>{comment.resolved ? 'Validée par studio' : 'En attente'}</span>
                           </span>
-                        ) : (
-                          /* Studio View: CAN VALIDATE & CAN DELETE */
-                          <>
-                            {onToggleResolveComment && (
-                              <button
-                                type="button"
-                                onClick={() => onToggleResolveComment(comment.id)}
-                                className={`px-2 py-0.5 rounded-md text-[10px] font-semibold flex items-center gap-1 transition-colors border ${
-                                  comment.resolved
-                                    ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25'
-                                    : 'text-dark-300 hover:text-emerald-400 bg-dark-750 hover:bg-emerald-500/10 border-dark-700'
-                                }`}
-                                title={comment.resolved ? 'Marquer comme non résolu' : 'Valider la correction comme effectuée'}
-                              >
-                                <CheckCircle2 className="w-3 h-3" />
-                                <span>{comment.resolved ? 'Corrigé ✓' : 'Valider correction'}</span>
-                              </button>
-                            )}
+                        )}
 
-                            {onDeleteComment && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (confirm('Supprimer cette remarque ?')) {
-                                    onDeleteComment(comment.id);
-                                  }
-                                }}
-                                className="p-1 rounded-md text-dark-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                                title="Supprimer la remarque"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                          </>
+                        {!isClientMode && onDeleteComment && (
+                          <button
+                            type="button"
+                            onClick={() => onDeleteComment(comment.id)}
+                            className="p-1 rounded text-dark-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                            title="Supprimer la remarque"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         )}
                       </div>
                     </div>
 
-                    {/* Comment Body */}
-                    <p className="text-xs text-dark-100 whitespace-pre-wrap pl-1 leading-relaxed">
+                    {/* Author & Timestamp */}
+                    <div className="flex items-center gap-1.5 text-[10px] text-dark-400 mb-2">
+                      <strong className="text-dark-200">{comment.author}</strong>
+                      <span>•</span>
+                      <span>{new Date(comment.createdAt).toLocaleDateString('fr-FR', {
+                        day: '2-digit',
+                        month: 'short',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}</span>
+                    </div>
+
+                    {/* Comment text */}
+                    <p className="text-xs text-dark-100 leading-relaxed whitespace-pre-wrap">
                       {comment.text}
                     </p>
 
-                    {/* Replies Thread */}
-                    {hasReplies && (
-                      <div className="mt-2.5 pt-2 border-t border-dark-750/70 space-y-1.5 pl-3">
-                        {comment.replies!.map((reply) => (
-                          <div
-                            key={reply.id}
-                            className="p-2 rounded-lg bg-dark-850/80 border border-dark-750 text-xs flex items-start gap-2"
-                          >
-                            <CornerDownRight className="w-3.5 h-3.5 text-gold-400 flex-shrink-0 mt-0.5" />
-                            <div className="flex-1">
-                              <div className="flex items-center justify-between mb-0.5">
-                                <span className="text-[11px] font-bold text-gold-400">
-                                  {reply.author}
-                                </span>
-                                <span className="text-[10px] text-dark-500 font-mono">
-                                  {new Date(reply.createdAt).toLocaleTimeString([], {
-                                    hour: '2-digit',
-                                    minute: '2-digit',
-                                  })}
-                                </span>
-                              </div>
-                              <p className="text-dark-200 text-xs leading-relaxed">
-                                {reply.text}
-                              </p>
+                    {/* Replies thread */}
+                    {comment.replies && comment.replies.length > 0 && (
+                      <div className="mt-2.5 pt-2 border-t border-dark-750/70 space-y-1.5 pl-3 border-l-2 border-l-gold-400/40">
+                        {comment.replies.map((reply) => (
+                          <div key={reply.id} className="text-xs">
+                            <div className="flex items-center gap-1.5 text-[10px] text-dark-400">
+                              <CornerDownRight className="w-3 h-3 text-gold-400" />
+                              <strong className="text-gold-400">{reply.author}</strong>
+                              <span>•</span>
+                              <span>{new Date(reply.createdAt).toLocaleTimeString('fr-FR', {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}</span>
                             </div>
+                            <p className="text-dark-200 pl-4 mt-0.5 text-xs">{reply.text}</p>
                           </div>
                         ))}
                       </div>
                     )}
 
-                    {/* Studio Reply Action */}
+                    {/* Studio Reply Box (Only studio can reply) */}
                     {!isClientMode && onAddReply && (
-                      <div className="mt-2 pt-1 flex justify-end">
-                        {!isReplyingThis ? (
+                      <div className="mt-2.5 pt-2 border-t border-dark-750 flex flex-col gap-1.5">
+                        {replyingCommentId === comment.id ? (
+                          <div className="flex gap-1.5">
+                            <input
+                              type="text"
+                              value={replyText}
+                              onChange={(e) => setReplyText(e.target.value)}
+                              placeholder="Votre réponse au client..."
+                              className="flex-1 bg-dark-900 border border-dark-700 rounded-lg px-2.5 py-1 text-xs text-dark-100 focus:outline-none focus:border-gold-400"
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleSubmitReply(comment.id);
+                              }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleSubmitReply(comment.id)}
+                              className="px-2.5 py-1 bg-gold-400 text-dark-950 font-bold text-xs rounded-lg hover:bg-gold-300"
+                            >
+                              Répondre
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setReplyingCommentId(null);
+                                setReplyText('');
+                              }}
+                              className="px-2 py-1 text-dark-400 text-xs hover:text-dark-200"
+                            >
+                              Annuler
+                            </button>
+                          </div>
+                        ) : (
                           <button
                             type="button"
                             onClick={() => {
                               setReplyingCommentId(comment.id);
                               setReplyText('');
                             }}
-                            className="text-[11px] font-semibold text-gold-400 hover:text-gold-300 flex items-center gap-1 transition-colors px-2 py-0.5 rounded hover:bg-gold-400/10"
+                            className="text-[11px] font-semibold text-gold-400 hover:text-gold-300 flex items-center gap-1 self-start"
                           >
                             <CornerDownRight className="w-3 h-3" />
-                            <span>Répondre au client</span>
+                            <span>Répondre à cette remarque</span>
                           </button>
-                        ) : (
-                          <div className="w-full mt-2 p-2.5 rounded-xl bg-dark-850 border border-dark-700/80 space-y-2">
-                            <span className="text-[11px] font-bold text-gold-400 block">
-                              Répondre au commentaire :
-                            </span>
-                            <textarea
-                              rows={2}
-                              autoFocus
-                              value={replyText}
-                              onChange={(e) => setReplyText(e.target.value)}
-                              placeholder="Ex: Correction effectuée sur le fichier, merci de vérifier..."
-                              className="w-full bg-dark-900 border border-dark-700 text-xs p-2 rounded-lg text-dark-100 focus:outline-none focus:border-gold-400 resize-none"
-                            />
-                            <div className="flex justify-end gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => setReplyingCommentId(null)}
-                                className="px-2.5 py-1 text-xs text-dark-400 hover:text-dark-200"
-                              >
-                                Annuler
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleSubmitReply(comment.id)}
-                                disabled={!replyText.trim()}
-                                className="flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-bold bg-gold-400 hover:bg-gold-300 text-dark-950 disabled:opacity-40"
-                              >
-                                <Send className="w-3 h-3" />
-                                <span>Envoyer la réponse</span>
-                              </button>
-                            </div>
-                          </div>
                         )}
                       </div>
                     )}
@@ -599,7 +510,24 @@ export const ClientCommentsModal: React.FC<ClientCommentsModalProps> = ({
             )}
           </div>
         </div>
-      </div>
-    </div>
+
+        {/* Panel Footer: Summary Export (for studio) */}
+        {!isClientMode && comments.length > 0 && (
+          <div className="p-3 sm:p-4 border-t border-dark-700/60 bg-dark-900/90 flex items-center justify-between">
+            <span className="text-[11px] text-dark-400">
+              {comments.length} remarque(s) au total
+            </span>
+            <button
+              type="button"
+              onClick={handleCopySummary}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-dark-800 hover:bg-dark-750 text-gold-400 border border-dark-700/70 transition-colors"
+            >
+              {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+              <span>{copied ? 'Copié !' : 'Copier le récapitulatif'}</span>
+            </button>
+          </div>
+        )}
+      </aside>
+    </>
   );
 };

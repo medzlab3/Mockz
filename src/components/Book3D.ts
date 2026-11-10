@@ -67,18 +67,26 @@ export class Book3DModel {
     // Smooth leaf turns with physics per paper weight (cover vs inside)
     const numSheets = this.leaves.length;
     for (const leaf of this.leaves) {
-      if (Math.abs(leaf.currentAngle - leaf.targetAngle) > 0.0001) {
-        leaf.currentAngle += (leaf.targetAngle - leaf.currentAngle) * lerpSpeed;
+      const angleDiff = leaf.targetAngle - leaf.currentAngle;
+      if (Math.abs(angleDiff) > 0.0001) {
+        leaf.currentAngle += angleDiff * lerpSpeed;
         leaf.pivot.rotation.y = leaf.currentAngle;
 
-        // Realistic curl during motion based on this leaf's weight
-        const leafWeight = this.getSheetWeight(leaf.sheetIndex, numSheets);
-        const bendIntensity =
-          leafWeight === 120 ? 0.04 :
-          leafWeight === 250 ? 0.012 : 0.003;
-        const progress = Math.abs(leaf.currentAngle / Math.PI);
-        const curl = Math.sin(progress * Math.PI) * bendIntensity;
-        leaf.leafGroup.rotation.z = -curl * 0.2;
+        // Dynamic curl ONLY while turning (angle moving)
+        if (Math.abs(angleDiff) > 0.005) {
+          const leafWeight = this.getSheetWeight(leaf.sheetIndex, numSheets);
+          const bendIntensity =
+            leafWeight === 120 ? 0.03 :
+            leafWeight === 250 ? 0.01 : 0.002;
+          const progress = Math.abs(leaf.currentAngle / Math.PI);
+          const curl = Math.sin(progress * Math.PI) * bendIntensity;
+          leaf.leafGroup.rotation.z = -curl * 0.15;
+        } else {
+          // Return to flat when resting at target angle (prevents resting scissor-cross)
+          leaf.leafGroup.rotation.z += (0 - leaf.leafGroup.rotation.z) * lerpSpeed;
+        }
+      } else {
+        leaf.leafGroup.rotation.z += (0 - leaf.leafGroup.rotation.z) * lerpSpeed;
       }
     }
   }
@@ -187,9 +195,7 @@ export class Book3DModel {
     this.root.add(this.shadowPlane);
 
     // Spine rod (reliure centrale)
-    const avgWeight = (this.getSheetWeight(0, numSheets) + this.getSheetWeight(1, numSheets)) / 2;
-    const sheetThickness = 0.0035 * (avgWeight / 120);
-    const spineRadius = Math.max(0.012, numSheets * sheetThickness * 0.7);
+    const spineRadius = Math.max(0.008, Math.min(0.024, numSheets * 0.0018));
     const spineGeo = new THREE.CylinderGeometry(spineRadius, spineRadius, height, 32);
     const spineMat = this.createPaperMaterial(0, true);
     this.spineMesh = new THREE.Mesh(spineGeo, spineMat);
@@ -197,10 +203,10 @@ export class Book3DModel {
     this.spineMesh.receiveShadow = true;
     this.root.add(this.spineMesh);
 
-    // Create sheets: each sheet has thickness and material corresponding to cover vs inside
+    // Create sheets: realistic thickness prevents clipping through adjacent sheets
     for (let i = 0; i < numSheets; i++) {
-      const leafWeight = this.getSheetWeight(i, numSheets);
-      const leafThickness = 0.0035 * (leafWeight / 120);
+      const isCover = this.isCoverSheet(i, numSheets);
+      const leafThickness = isCover ? 0.0028 : 0.0012;
       const leaf = this.createLeaf(i, width, height, leafThickness);
       this.leaves.push(leaf);
       this.root.add(leaf.pivot);
@@ -208,7 +214,7 @@ export class Book3DModel {
   }
 
   /**
-   * Builds a single leaf. Pivot is exactly at (0, 0, 0) on the spine.
+   * Builds a single leaf. Pivot is along the spine.
    */
   private createLeaf(
     sheetIndex: number,
@@ -310,6 +316,12 @@ export class Book3DModel {
    *   k = 0 : Closed on Cover (Page 1)
    *   1 <= k < numSheets : Open spread between Sheet k-1 (left) and Sheet k (right)
    *   k = numSheets : Closed on Back Cover (Page N)
+   *
+   * Stacking rules (prevents all chevauchement & polygon clipping):
+   * - Left stack: Sheet k-1 is the top visible page at baseLeft.
+   *   All underlying sheets (i < k - 1) are rotated further back and shifted in -Z.
+   * - Right stack: Sheet k is the top visible page at baseRight.
+   *   All underlying sheets (i > k) are rotated further back and shifted in -Z.
    */
   public updateAngles(instant: boolean = false) {
     const numSheets = this.leaves.length;
@@ -317,25 +329,33 @@ export class Book3DModel {
 
     const formatDims = FORMAT_DIMENSIONS[this.settings.format] || FORMAT_DIMENSIONS.a5;
     const width = formatDims.width;
-    const k = Math.min(numSheets, Math.max(0, typeof this.settings.currentSpread === 'number' ? this.settings.currentSpread : 1));
-    const openDeg = Math.min(180, Math.max(0, typeof this.settings.openAngle === 'number' && !isNaN(this.settings.openAngle) ? this.settings.openAngle : 90));
-    const delta = 0.0035; // Fine angular offset between stacked sheets (zero clipping)
+    const k = Math.min(numSheets, Math.max(0, typeof this.settings.currentSpread === 'number' ? this.settings.currentSpread : 0));
+    const openDeg = Math.min(180, Math.max(0, typeof this.settings.openAngle === 'number' && !isNaN(this.settings.openAngle) ? this.settings.openAngle : 0));
+    const delta = 0.004; // Angular offset between stacked pages
+    const zOffset = 0.0016; // Spine Z depth separation between stacked sheets
 
     if (k === 0) {
       // ── SPREAD 0: CLOSED ON FRONT COVER (Page 1) ──
       const u = openDeg / 180;
       const coverLift = (u > 0) ? -u * Math.PI : 0;
+      
       this.leaves[0].targetAngle = coverLift;
+      this.leaves[0].pivot.position.z = 0;
+
       for (let i = 1; i < numSheets; i++) {
         this.leaves[i].targetAngle = i * delta;
+        this.leaves[i].pivot.position.z = -i * zOffset;
       }
 
       // Center the closed cover in the viewport
       this.targetCenterX = (u > 0) ? -(1 - u) * (width / 2) : -width / 2;
     } else if (k === numSheets) {
       // ── SPREAD N: CLOSED ON BACK COVER (Page N) ──
+      // Sheet numSheets - 1 is the back cover face
       for (let i = 0; i < numSheets; i++) {
-        this.leaves[i].targetAngle = -Math.PI + (i * delta);
+        const stackPos = (numSheets - 1) - i;
+        this.leaves[i].targetAngle = -Math.PI + (stackPos * delta);
+        this.leaves[i].pivot.position.z = -stackPos * zOffset;
       }
 
       // Center the closed back cover in the viewport
@@ -349,9 +369,17 @@ export class Book3DModel {
       for (let i = 0; i < numSheets; i++) {
         const leaf = this.leaves[i];
         if (i < k) {
-          leaf.targetAngle = baseLeft + (i * delta);
+          // LEFT STACK
+          // Sheet k - 1 is top visible page: distance from top is (k - 1 - i)
+          const depthFromTop = (k - 1) - i;
+          leaf.targetAngle = baseLeft - (depthFromTop * delta);
+          leaf.pivot.position.z = -depthFromTop * zOffset;
         } else {
-          leaf.targetAngle = baseRight + (i * delta);
+          // RIGHT STACK
+          // Sheet k is top visible page: distance from top is (i - k)
+          const depthFromTop = i - k;
+          leaf.targetAngle = baseRight + (depthFromTop * delta);
+          leaf.pivot.position.z = -depthFromTop * zOffset;
         }
       }
 
