@@ -1,0 +1,75 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    width: 100%;
+    background-color: #0a0804;
+    color: #faf7ef;
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  }
+}
+
+/* Custom luxury scrollbar with #ffc300 gold accent */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 5px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 195, 0, 0.25);
+  border-radius: 999px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 195, 0, 0.5);
+}
+
+/* Range slider styling with #ffc300 gold thumb */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 999px;
+  background: #2a2215;
+  outline: none;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ffc300;
+  cursor: pointer;
+  border: 2px solid #0a0804;
+  box-shadow: 0 0 10px rgba(255, 195, 0, 0.6);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+  box-shadow: 0 0 14px rgba(255, 195, 0, 0.85);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ffc300;
+  cursor: pointer;
+  border: 2px solid #0a0804;
+  box-shadow: 0 0 10px rgba(255, 195, 0, 0.6);
+}
+
+/* Modal and sidebar backdrops */
+.sidebar-backdrop {
+  background: rgba(10, 8, 4, 0.75);
+  backdrop-filter: blur(8px);
+}
