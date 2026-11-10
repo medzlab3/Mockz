@@ -17,13 +17,29 @@ export interface BookSettings {
   pageCount: number; // min 4, must be multiple of 2 (or 4 for signature)
   openAngle: number; // 0 (closed) to 180 (flat open)
   currentSpread: number; // 0 = closed cover (P1), 1 = P2-3, 2 = P4-5, ... S = closed back (PN)
-  paperFinish: PaperFinish;
-  paperWeight: PaperWeight;
+
+  // Separate paper specs: Cover (Couverture 4 volets) vs Inside Pages (Feuillets intérieurs)
+  coverPaperWeight: PaperWeight;
+  coverPaperFinish: PaperFinish;
+  insidePaperWeight: PaperWeight;
+  insidePaperFinish: PaperFinish;
+
+  // Fallbacks / legacy
+  paperFinish?: PaperFinish;
+  paperWeight?: PaperWeight;
+
   autoRotate: boolean;
   roughness: number;
   metalness: number;
   showShadows: boolean;
   backgroundTheme: 'dark' | 'light' | 'studio' | 'transparent';
+}
+
+export interface CommentReply {
+  id: string;
+  author: string; // "Studio Mockz", "Graphiste", etc.
+  text: string;
+  createdAt: string;
 }
 
 export interface ClientComment {
@@ -32,7 +48,10 @@ export interface ClientComment {
   author: string;
   text: string;
   createdAt: string;
-  resolved?: boolean;
+  resolved: boolean;
+  resolvedAt?: string;
+  resolvedBy?: string;
+  replies?: CommentReply[];
 }
 
 export interface BATApproval {
@@ -42,11 +61,24 @@ export interface BATApproval {
   clientEmail?: string;
   company?: string;
   format: PageFormat;
-  paperWeight: PaperWeight;
-  paperFinish: PaperFinish;
+  coverPaperWeight: PaperWeight;
+  coverPaperFinish: PaperFinish;
+  insidePaperWeight: PaperWeight;
+  insidePaperFinish: PaperFinish;
+  paperWeight?: PaperWeight;
+  paperFinish?: PaperFinish;
   pageCount: number;
   notes?: string;
   batReference?: string;
+}
+
+export interface ProjectData {
+  id: string;
+  settings: BookSettings;
+  pages: PageSlot[];
+  comments: ClientComment[];
+  batApproval: BATApproval | null;
+  updatedAt: string;
 }
 
 export const FORMAT_DIMENSIONS: Record<PageFormat, { width: number; height: number; ratio: string; label: string }> = {

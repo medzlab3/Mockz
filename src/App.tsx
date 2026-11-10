@@ -16,19 +16,21 @@ import {
   PaperWeight,
   FORMAT_DIMENSIONS,
   ClientComment,
+  CommentReply,
   BATApproval
 } from './types';
 import { generateSampleInvitationPages } from './utils/sampleData';
-
-const SETTINGS_STORAGE_KEY = 'mockz_settings_v3';
-const COMMENTS_STORAGE_KEY = 'mockz_comments_v1';
-const BAT_STORAGE_KEY = 'mockz_bat_approval_v1';
+import { saveProjectToCloud, loadProjectFromCloud } from './utils/cloudSync';
 
 const DEFAULT_SETTINGS: BookSettings = {
   format: 'a5',
   pageCount: 4,
   openAngle: 90,
   currentSpread: 1,
+  coverPaperWeight: 350,
+  coverPaperFinish: 'matte',
+  insidePaperWeight: 120,
+  insidePaperFinish: 'matte',
   paperFinish: 'matte',
   paperWeight: 350,
   autoRotate: false,
@@ -87,6 +89,28 @@ export function App() {
     return urlParams.get('view') === 'client';
   });
 
+  // Unique Project ID: provides total isolation between projects
+  const [projectId] = useState<string>(() => {
+    const fromUrl = urlParams.get('p') || urlParams.get('project');
+    if (fromUrl) return fromUrl;
+    const saved = localStorage.getItem('mockz_active_project_id');
+    if (saved) return saved;
+    const newId = `prj-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
+    try {
+      localStorage.setItem('mockz_active_project_id', newId);
+    } catch { /* ignore */ }
+    return newId;
+  });
+
+  // Ensure URL reflects projectId in studio mode
+  useEffect(() => {
+    if (!urlParams.get('p') && !isClientMode) {
+      const url = new URL(window.location.href);
+      url.searchParams.set('p', projectId);
+      window.history.replaceState({}, '', url.toString());
+    }
+  }, [projectId, isClientMode, urlParams]);
+
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const [settings, setSettings] = useState<BookSettings>(() => {
@@ -100,16 +124,22 @@ export function App() {
     const base: BookSettings = { ...DEFAULT_SETTINGS };
 
     try {
-      const saved = localStorage.getItem(SETTINGS_STORAGE_KEY);
-      if (saved && urlParams.get('view') !== 'client') {
+      const saved = localStorage.getItem(`mockz_settings_${projectId}`);
+      if (saved && !isClientMode) {
         Object.assign(base, JSON.parse(saved));
       }
     } catch { /* ignore */ }
 
     if (fmt && FORMAT_DIMENSIONS[fmt]) base.format = fmt;
     if (count >= 4 && count % 2 === 0) base.pageCount = count;
-    if ([120, 250, 350].includes(weight)) base.paperWeight = weight;
-    if (['matte', 'glossy', 'kraft', 'textured'].includes(finish || '')) base.paperFinish = finish!;
+    if ([120, 250, 350].includes(weight)) {
+      base.coverPaperWeight = weight;
+      base.paperWeight = weight;
+    }
+    if (['matte', 'glossy', 'kraft', 'textured'].includes(finish || '')) {
+      base.coverPaperFinish = finish!;
+      base.paperFinish = finish!;
+    }
     if (angle >= 0 && angle <= 180) base.openAngle = angle;
     if (spread >= 0) base.currentSpread = spread;
 
@@ -117,6 +147,13 @@ export function App() {
   });
 
   const [pages, setPages] = useState<PageSlot[]>(() => {
+    try {
+      const savedPages = localStorage.getItem(`mockz_pages_${projectId}`);
+      if (savedPages && !isClientMode) {
+        return JSON.parse(savedPages);
+      }
+    } catch { /* ignore */ }
+
     const sampleImages = generateSampleInvitationPages();
     const count = settings.pageCount || 4;
     const slots = generatePageSlots(count);
@@ -129,7 +166,7 @@ export function App() {
   // Client Comments State
   const [comments, setComments] = useState<ClientComment[]>(() => {
     try {
-      const saved = localStorage.getItem(COMMENTS_STORAGE_KEY);
+      const saved = localStorage.getItem(`mockz_comments_${projectId}`);
       if (saved) return JSON.parse(saved);
     } catch { /* ignore */ }
     return [];
@@ -138,11 +175,16 @@ export function App() {
   // BAT Approval State
   const [batApproval, setBatApproval] = useState<BATApproval | null>(() => {
     try {
-      const saved = localStorage.getItem(BAT_STORAGE_KEY);
+      const saved = localStorage.getItem(`mockz_bat_${projectId}`);
       if (saved) return JSON.parse(saved);
     } catch { /* ignore */ }
     return null;
   });
+
+  // Cloud status states
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isSavingCloud, setIsSavingCloud] = useState(false);
+  const isInitialMount = useRef(true);
 
   // Modals
   const [isFinishesModalOpen, setIsFinishesModalOpen] = useState(false);
@@ -153,19 +195,73 @@ export function App() {
 
   const threeCanvasRef = useRef<ThreeCanvasHandle>(null);
 
-  // Sync settings
+  // Initial load from Cloud Firestore if project exists in cloud
   useEffect(() => {
-    try {
-      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
-    } catch { /* ignore */ }
-  }, [settings]);
+    loadProjectFromCloud(projectId).then((cloudProject) => {
+      if (cloudProject) {
+        if (cloudProject.settings) setSettings(cloudProject.settings);
+        if (cloudProject.pages && cloudProject.pages.length > 0) setPages(cloudProject.pages);
+        if (cloudProject.comments) setComments(cloudProject.comments);
+        if (cloudProject.batApproval) setBatApproval(cloudProject.batApproval);
+      }
+    });
+  }, [projectId]);
 
-  // Sync comments
+  // Sync to local project storage
   useEffect(() => {
     try {
-      localStorage.setItem(COMMENTS_STORAGE_KEY, JSON.stringify(comments));
+      localStorage.setItem(`mockz_settings_${projectId}`, JSON.stringify(settings));
+      localStorage.setItem(`mockz_pages_${projectId}`, JSON.stringify(pages));
+      localStorage.setItem(`mockz_comments_${projectId}`, JSON.stringify(comments));
+      if (batApproval) {
+        localStorage.setItem(`mockz_bat_${projectId}`, JSON.stringify(batApproval));
+      }
     } catch { /* ignore */ }
-  }, [comments]);
+  }, [projectId, settings, pages, comments, batApproval]);
+
+  // Debounced auto-save to Cloud Firestore
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setIsSavingCloud(true);
+      await saveProjectToCloud(projectId, {
+        id: projectId,
+        settings,
+        pages,
+        comments,
+        batApproval,
+        updatedAt: new Date().toISOString(),
+      });
+      setIsSavingCloud(false);
+    }, 1200);
+
+    return () => clearTimeout(timer);
+  }, [projectId, settings, pages, comments, batApproval]);
+
+  // Manual refresh from Cloud (for client when designer made edits)
+  const handleRefreshFromCloud = useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      const data = await loadProjectFromCloud(projectId);
+      if (data) {
+        if (data.settings) setSettings(data.settings);
+        if (data.pages && data.pages.length > 0) setPages(data.pages);
+        if (data.comments) setComments(data.comments);
+        if (data.batApproval) setBatApproval(data.batApproval);
+        setExportMessage('Maquette actualisée avec les modifications du studio !');
+        setTimeout(() => setExportMessage(null), 3500);
+      } else {
+        setExportMessage('Votre maquette est déjà à jour.');
+        setTimeout(() => setExportMessage(null), 2500);
+      }
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [projectId]);
 
   const updateSettings = useCallback((patch: Partial<BookSettings>) => {
     setSettings((prev) => ({ ...prev, ...patch }));
@@ -223,6 +319,10 @@ export function App() {
     setSettings((prev) => ({
       ...prev,
       pageCount: 4,
+      coverPaperWeight: 350,
+      coverPaperFinish: 'matte',
+      insidePaperWeight: 120,
+      insidePaperFinish: 'matte',
       paperWeight: 350,
       paperFinish: 'matte',
       openAngle: 90,
@@ -261,8 +361,28 @@ export function App() {
       ...newComment,
       id: `cmt-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       createdAt: new Date().toISOString(),
+      replies: [],
     };
     setComments((prev) => [comment, ...prev]);
+  }, []);
+
+  // Studio reply to comment
+  const handleAddReply = useCallback((commentId: string, replyText: string) => {
+    setComments((prev) =>
+      prev.map((c) => {
+        if (c.id !== commentId) return c;
+        const newReply: CommentReply = {
+          id: `rep-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+          author: 'Studio Mockz',
+          text: replyText,
+          createdAt: new Date().toISOString(),
+        };
+        return {
+          ...c,
+          replies: [...(c.replies || []), newReply],
+        };
+      })
+    );
   }, []);
 
   const handleDeleteComment = useCallback((id: string) => {
@@ -278,9 +398,6 @@ export function App() {
   // BAT handler
   const handleSaveBAT = useCallback((approval: BATApproval) => {
     setBatApproval(approval);
-    try {
-      localStorage.setItem(BAT_STORAGE_KEY, JSON.stringify(approval));
-    } catch { /* ignore */ }
     setExportMessage('Bon À Tirer (BAT) validé et enregistré !');
     setTimeout(() => setExportMessage(null), 4000);
   }, []);
@@ -362,12 +479,15 @@ export function App() {
           onOpenFinishesModal={() => setIsFinishesModalOpen(true)}
           onOpenCommentsModal={() => setIsCommentsModalOpen(true)}
           onOpenBATModal={() => setIsBATModalOpen(true)}
+          onRefresh={handleRefreshFromCloud}
+          isRefreshing={isRefreshing}
         />
       ) : (
         <Header
           settings={settings}
           commentsCount={activeCommentsCount}
           batApproval={batApproval}
+          isSavingCloud={isSavingCloud}
           onUpdateSettings={updateSettings}
           onExport={handleExport}
           onResetCamera={(preset) => threeCanvasRef.current?.resetCamera(preset)}
@@ -427,6 +547,7 @@ export function App() {
         comments={comments}
         pages={pages}
         onAddComment={handleAddComment}
+        onAddReply={handleAddReply}
         onDeleteComment={handleDeleteComment}
         onToggleResolveComment={handleToggleResolveComment}
         isClientMode={isClientMode}
@@ -444,9 +565,11 @@ export function App() {
         isOpen={isShareModalOpen}
         onClose={() => setIsShareModalOpen(false)}
         settings={settings}
+        projectId={projectId}
         onSwitchToClientMode={() => {
           const url = new URL(window.location.href);
           url.searchParams.set('view', 'client');
+          url.searchParams.set('p', projectId);
           window.location.href = url.toString();
         }}
       />

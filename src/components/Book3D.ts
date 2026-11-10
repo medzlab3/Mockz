@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BookSettings, FORMAT_DIMENSIONS, PageSlot } from '../types';
+import { BookSettings, FORMAT_DIMENSIONS, PageSlot, PaperFinish, PaperWeight } from '../types';
 import { createDefaultPageTexture, loadUserTexture, clearTextureCache } from '../utils/textureGenerator';
 
 interface LeafMeshGroup {
@@ -64,16 +64,18 @@ export class Book3DModel {
       this.root.position.x = this.currentCenterX;
     }
 
-    // Smooth leaf turns
+    // Smooth leaf turns with physics per paper weight (cover vs inside)
+    const numSheets = this.leaves.length;
     for (const leaf of this.leaves) {
       if (Math.abs(leaf.currentAngle - leaf.targetAngle) > 0.0001) {
         leaf.currentAngle += (leaf.targetAngle - leaf.currentAngle) * lerpSpeed;
         leaf.pivot.rotation.y = leaf.currentAngle;
 
-        // Subtle realistic curl during motion
+        // Realistic curl during motion based on this leaf's weight
+        const leafWeight = this.getSheetWeight(leaf.sheetIndex, numSheets);
         const bendIntensity =
-          this.settings.paperWeight === 120 ? 0.04 :
-          this.settings.paperWeight === 250 ? 0.012 : 0.003;
+          leafWeight === 120 ? 0.04 :
+          leafWeight === 250 ? 0.012 : 0.003;
         const progress = Math.abs(leaf.currentAngle / Math.PI);
         const curl = Math.sin(progress * Math.PI) * bendIntensity;
         leaf.leafGroup.rotation.z = -curl * 0.2;
@@ -102,23 +104,50 @@ export class Book3DModel {
     this.spineMesh = null;
   }
 
+  private isCoverSheet(sheetIndex: number, totalSheets: number): boolean {
+    if (totalSheets <= 2) return true; // 4 pages = all cover
+    return sheetIndex === 0 || sheetIndex === totalSheets - 1;
+  }
+
+  private getSheetFinish(sheetIndex: number, totalSheets: number): PaperFinish {
+    const isCover = this.isCoverSheet(sheetIndex, totalSheets);
+    if (isCover) {
+      return this.settings.coverPaperFinish || this.settings.paperFinish || 'matte';
+    }
+    return this.settings.insidePaperFinish || this.settings.paperFinish || 'matte';
+  }
+
+  private getSheetWeight(sheetIndex: number, totalSheets: number): PaperWeight {
+    const isCover = this.isCoverSheet(sheetIndex, totalSheets);
+    if (isCover) {
+      return this.settings.coverPaperWeight || this.settings.paperWeight || 350;
+    }
+    return this.settings.insidePaperWeight || this.settings.paperWeight || 120;
+  }
+
   private async loadAllTextures() {
     for (const tex of this.textures) {
       if (tex) tex.dispose();
     }
     this.textures = [];
 
-    for (const page of this.pages) {
+    const totalSheets = Math.ceil(this.pages.length / 2);
+
+    for (let pIdx = 0; pIdx < this.pages.length; pIdx++) {
+      const page = this.pages[pIdx];
+      const sheetIndex = Math.floor(pIdx / 2);
+      const finish = this.getSheetFinish(sheetIndex, totalSheets);
+
       if (page.imageUrl) {
         try {
           const tex = await loadUserTexture(page.imageUrl);
           tex.anisotropy = 16;
           this.textures.push(tex);
         } catch {
-          this.textures.push(createDefaultPageTexture(page, this.settings.paperFinish));
+          this.textures.push(createDefaultPageTexture(page, finish));
         }
       } else {
-        this.textures.push(createDefaultPageTexture(page, this.settings.paperFinish));
+        this.textures.push(createDefaultPageTexture(page, finish));
       }
     }
   }
@@ -147,7 +176,6 @@ export class Book3DModel {
   private buildGeometry() {
     const { width, height } = FORMAT_DIMENSIONS[this.settings.format] || FORMAT_DIMENSIONS.a5;
     const numSheets = Math.ceil(this.settings.pageCount / 2);
-    const sheetThickness = 0.0035 * (this.settings.paperWeight / 120);
 
     // Ground shadow plane
     const shadowGeo = new THREE.PlaneGeometry(width * 3.8, height * 2.6);
@@ -159,17 +187,21 @@ export class Book3DModel {
     this.root.add(this.shadowPlane);
 
     // Spine rod (reliure centrale)
+    const avgWeight = (this.getSheetWeight(0, numSheets) + this.getSheetWeight(1, numSheets)) / 2;
+    const sheetThickness = 0.0035 * (avgWeight / 120);
     const spineRadius = Math.max(0.012, numSheets * sheetThickness * 0.7);
     const spineGeo = new THREE.CylinderGeometry(spineRadius, spineRadius, height, 32);
-    const spineMat = this.createPaperMaterial(true);
+    const spineMat = this.createPaperMaterial(0, true);
     this.spineMesh = new THREE.Mesh(spineGeo, spineMat);
     this.spineMesh.castShadow = true;
     this.spineMesh.receiveShadow = true;
     this.root.add(this.spineMesh);
 
-    // Create sheets: ALL sheets share pivot.position.z = 0 at the spine
+    // Create sheets: each sheet has thickness and material corresponding to cover vs inside
     for (let i = 0; i < numSheets; i++) {
-      const leaf = this.createLeaf(i, width, height, sheetThickness);
+      const leafWeight = this.getSheetWeight(i, numSheets);
+      const leafThickness = 0.0035 * (leafWeight / 120);
+      const leaf = this.createLeaf(i, width, height, leafThickness);
       this.leaves.push(leaf);
       this.root.add(leaf.pivot);
     }
@@ -177,7 +209,6 @@ export class Book3DModel {
 
   /**
    * Builds a single leaf. Pivot is exactly at (0, 0, 0) on the spine.
-   * This mathematically prevents any diagonal crossing or cut in half.
    */
   private createLeaf(
     sheetIndex: number,
@@ -186,7 +217,6 @@ export class Book3DModel {
     thickness: number
   ): LeafMeshGroup {
     const pivot = new THREE.Group();
-    // Identical pivot point at the spine axis for all sheets
     pivot.position.set(0, 0, 0);
 
     const leafGroup = new THREE.Group();
@@ -203,8 +233,8 @@ export class Book3DModel {
     backGeo.rotateY(Math.PI);
     backGeo.translate(width / 2, 0, -thickness / 2);
 
-    const frontMat = this.createPaperMaterial();
-    const backMat = this.createPaperMaterial();
+    const frontMat = this.createPaperMaterial(sheetIndex);
+    const backMat = this.createPaperMaterial(sheetIndex);
 
     const frontMesh = new THREE.Mesh(frontGeo, frontMat);
     frontMesh.castShadow = true;
@@ -216,7 +246,7 @@ export class Book3DModel {
 
     // Edges (top, bottom, outer edge only — 0 Z-fighting)
     const edgesGroup = new THREE.Group();
-    const edgeMat = this.createPaperMaterial(true);
+    const edgeMat = this.createPaperMaterial(sheetIndex, true);
 
     const topGeo = new THREE.PlaneGeometry(width, thickness);
     topGeo.rotateX(-Math.PI / 2);
@@ -252,18 +282,21 @@ export class Book3DModel {
     };
   }
 
-  private createPaperMaterial(isEdge: boolean = false): THREE.MeshStandardMaterial {
+  private createPaperMaterial(sheetIndex: number, isEdge: boolean = false): THREE.MeshStandardMaterial {
+    const totalSheets = this.leaves.length || Math.ceil(this.settings.pageCount / 2);
+    const finish = this.getSheetFinish(sheetIndex, totalSheets);
+
     let roughness = 0.75;
     const metalness = 0.02;
 
-    switch (this.settings.paperFinish) {
+    switch (finish) {
       case 'glossy':   roughness = 0.18; break;
       case 'kraft':    roughness = 0.90; break;
       case 'textured': roughness = 0.85; break;
     }
 
     return new THREE.MeshStandardMaterial({
-      color: this.settings.paperFinish === 'kraft' ? 0xd2b48c : 0xfcfbf9,
+      color: finish === 'kraft' ? 0xd2b48c : 0xfcfbf9,
       roughness: isEdge ? 0.95 : roughness,
       metalness,
       side: THREE.FrontSide,
@@ -290,9 +323,6 @@ export class Book3DModel {
 
     if (k === 0) {
       // ── SPREAD 0: CLOSED ON FRONT COVER (Page 1) ──
-      // Sheet 0 is the front cover.
-      // delta stacking: theta increases with i so Sheet 0 has the smallest angle (0 rad),
-      // putting Sheet 0 in front (+Z) and Sheet 1..N tucked safely behind in -Z.
       const u = openDeg / 180;
       const coverLift = (u > 0) ? -u * Math.PI : 0;
       this.leaves[0].targetAngle = coverLift;
@@ -304,7 +334,6 @@ export class Book3DModel {
       this.targetCenterX = (u > 0) ? -(1 - u) * (width / 2) : -width / 2;
     } else if (k === numSheets) {
       // ── SPREAD N: CLOSED ON BACK COVER (Page N) ──
-      // All sheets have turned to the left stack. Sheet numSheets-1 is on top.
       for (let i = 0; i < numSheets; i++) {
         this.leaves[i].targetAngle = -Math.PI + (i * delta);
       }
@@ -313,7 +342,6 @@ export class Book3DModel {
       this.targetCenterX = width / 2;
     } else {
       // ── SPREADS 1 TO numSheets - 1 : SYMMETRIC OPEN SPREAD ──
-      // u: 0 = closed flat (0°), 0.5 = standing V-shape (90°), 1 = flat open on table (180°)
       const u = openDeg / 180;
       const baseRight = -(1 - u) * u * Math.PI;
       const baseLeft = baseRight - (u * Math.PI);
@@ -321,10 +349,8 @@ export class Book3DModel {
       for (let i = 0; i < numSheets; i++) {
         const leaf = this.leaves[i];
         if (i < k) {
-          // Left stack: sheet k-1 is on top facing viewer, sheets below have smaller i
           leaf.targetAngle = baseLeft + (i * delta);
         } else {
-          // Right stack: sheet k is on top facing viewer, sheets below have larger i
           leaf.targetAngle = baseRight + (i * delta);
         }
       }

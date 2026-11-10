@@ -6,7 +6,8 @@ import {
   Maximize,
   Minimize,
   MessageSquare,
-  FileCheck
+  FileCheck,
+  RefreshCw
 } from 'lucide-react';
 import { BookSettings, FORMAT_DIMENSIONS, BATApproval } from '../types';
 
@@ -17,6 +18,8 @@ interface ClientHeaderProps {
   onOpenFinishesModal: () => void;
   onOpenCommentsModal: () => void;
   onOpenBATModal: () => void;
+  onRefresh: () => void;
+  isRefreshing?: boolean;
 }
 
 export const ClientHeader: React.FC<ClientHeaderProps> = ({
@@ -26,6 +29,8 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
   onOpenFinishesModal,
   onOpenCommentsModal,
   onOpenBATModal,
+  onRefresh,
+  isRefreshing = false,
 }) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -37,14 +42,20 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
     }
   };
 
-  const finishShort =
-    settings.paperFinish === 'matte'
-      ? 'Couché Mat'
-      : settings.paperFinish === 'glossy'
-      ? 'Couché Brillant'
-      : settings.paperFinish === 'kraft'
-      ? 'Kraft Naturel'
-      : 'Papier Vergé';
+  const coverWeight = settings.coverPaperWeight || settings.paperWeight || 350;
+  const coverFinish = settings.coverPaperFinish || settings.paperFinish || 'matte';
+  const insideWeight = settings.insidePaperWeight || settings.paperWeight || 120;
+  const insideFinish = settings.insidePaperFinish || settings.paperFinish || 'matte';
+
+  const finishShort = (finish: string) => {
+    switch (finish) {
+      case 'matte': return 'Couché Mat';
+      case 'glossy': return 'Couché Brillant';
+      case 'kraft': return 'Kraft';
+      case 'textured': return 'Vergé';
+      default: return finish;
+    }
+  };
 
   return (
     <header className="h-14 sm:h-16 border-b border-dark-700/60 bg-dark-900/95 backdrop-blur-xl px-3 sm:px-6 flex items-center justify-between z-20 select-none">
@@ -74,21 +85,36 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
           {(FORMAT_DIMENSIONS[settings.format] || FORMAT_DIMENSIONS.a5).label.split('(')[0].trim()}
         </span>
         <span className="text-dark-600">•</span>
-        <span className="text-xs font-bold text-gold-400 font-mono">
-          {settings.paperWeight} g/m²
+        <span className="text-xs text-dark-200">
+          Couv: <strong className="text-gold-400 font-mono">{coverWeight}g</strong> {finishShort(coverFinish)}
         </span>
-        <span className="text-dark-600">•</span>
-        <span className="text-xs font-semibold text-dark-200">
-          {finishShort}
-        </span>
+        {settings.pageCount > 4 && (
+          <>
+            <span className="text-dark-600">•</span>
+            <span className="text-xs text-dark-200">
+              Int.: <strong className="text-gold-400 font-mono">{insideWeight}g</strong> {finishShort(insideFinish)}
+            </span>
+          </>
+        )}
         <span className="text-dark-600">•</span>
         <span className="text-xs font-mono text-dark-300">
           {settings.pageCount} volets
         </span>
       </div>
 
-      {/* Right Actions: Paper finishes, Comments, BAT Validation, Fullscreen */}
+      {/* Right Actions: Refresh, Paper finishes, Comments, BAT Validation, Fullscreen */}
       <div className="flex items-center gap-2 sm:gap-2.5">
+        {/* Actualiser la maquette (pour charger les modifs directes du studio) */}
+        <button
+          onClick={onRefresh}
+          disabled={isRefreshing}
+          className="flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-xl text-xs font-semibold bg-dark-800 hover:bg-dark-750 text-dark-200 hover:text-gold-400 border border-dark-750 hover:border-gold-400/40 transition-all shadow-sm active:scale-95 disabled:opacity-50"
+          title="Actualiser pour charger les dernières modifications apportées par le studio"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-gold-400' : ''}`} />
+          <span className="hidden sm:inline">Actualiser</span>
+        </button>
+
         {/* Choix Papier & Finitions pour le client */}
         <button
           onClick={onOpenFinishesModal}
@@ -98,7 +124,7 @@ export const ClientHeader: React.FC<ClientHeaderProps> = ({
           <Sparkles className="w-3.5 h-3.5 text-gold-400" />
           <span className="hidden sm:inline">Papiers &amp; Finitions</span>
           <span className="text-[10px] px-1.5 py-0.5 rounded bg-gold-400/15 text-gold-400 font-mono hidden md:inline">
-            {settings.paperWeight}g • {finishShort}
+            {coverWeight}g
           </span>
         </button>
 

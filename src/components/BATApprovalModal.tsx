@@ -8,9 +8,11 @@ import {
   Check,
   ShieldCheck,
   Sparkles,
-  Printer
+  Printer,
+  BookOpen,
+  Layers
 } from 'lucide-react';
-import { BookSettings, FORMAT_DIMENSIONS, BATApproval } from '../types';
+import { BookSettings, FORMAT_DIMENSIONS, BATApproval, PaperFinish } from '../types';
 
 interface BATApprovalModalProps {
   isOpen: boolean;
@@ -38,30 +40,30 @@ export const BATApprovalModal: React.FC<BATApprovalModalProps> = ({
 
   const formatInfo = FORMAT_DIMENSIONS[settings.format] || FORMAT_DIMENSIONS.a5;
 
-  const finishName =
-    settings.paperFinish === 'matte'
-      ? 'Couché Mat (Soyeux sans reflet)'
-      : settings.paperFinish === 'glossy'
-      ? 'Couché Brillant (Reflets vifs haute lumière)'
-      : settings.paperFinish === 'kraft'
-      ? 'Papier Kraft Naturel (Écologique & brut)'
-      : 'Papier Vergé / Canson (Texture lin & fibres)';
+  const coverWeight = settings.coverPaperWeight || settings.paperWeight || 350;
+  const coverFinish = settings.coverPaperFinish || settings.paperFinish || 'matte';
+  const insideWeight = settings.insidePaperWeight || settings.paperWeight || 120;
+  const insideFinish = settings.insidePaperFinish || settings.paperFinish || 'matte';
 
-  const finishShort =
-    settings.paperFinish === 'matte'
-      ? 'Couché Mat'
-      : settings.paperFinish === 'glossy'
-      ? 'Couché Brillant'
-      : settings.paperFinish === 'kraft'
-      ? 'Kraft Naturel'
-      : 'Papier Vergé';
+  const isFourPages = settings.pageCount <= 4;
 
-  const weightDesc =
-    settings.paperWeight === 120
-      ? '120 g/m² (Souple - style brochure/magazine)'
-      : settings.paperWeight === 250
-      ? '250 g/m² (Semi-rigide - cartonné standard)'
-      : '350 g/m² (Rigide de prestige - haute tenue)';
+  const getFinishLabel = (finish: PaperFinish) => {
+    switch (finish) {
+      case 'matte': return 'Couché Mat (Soyeux sans reflet)';
+      case 'glossy': return 'Couché Brillant (Haute lumière)';
+      case 'kraft': return 'Kraft Naturel (Écologique & brut)';
+      case 'textured': return 'Papier Vergé / Canson (Texture lin & fibres)';
+    }
+  };
+
+  const getWeightDesc = (weight: number) => {
+    switch (weight) {
+      case 120: return 'Souple (recommandé pour intérieur)';
+      case 250: return 'Semi-rigide (cartonné standard)';
+      case 350: return 'Rigide de prestige (haute tenue)';
+      default: return `${weight} g/m²`;
+    }
+  };
 
   const handleValidateBAT = (e: React.FormEvent) => {
     e.preventDefault();
@@ -83,8 +85,12 @@ export const BATApprovalModal: React.FC<BATApprovalModalProps> = ({
       clientEmail: clientEmail.trim(),
       company: company.trim(),
       format: settings.format,
-      paperWeight: settings.paperWeight,
-      paperFinish: settings.paperFinish,
+      coverPaperWeight: coverWeight,
+      coverPaperFinish: coverFinish,
+      insidePaperWeight: insideWeight,
+      insidePaperFinish: insideFinish,
+      paperWeight: coverWeight,
+      paperFinish: coverFinish,
       pageCount: settings.pageCount,
       notes: notes.trim(),
       batReference: ref,
@@ -113,10 +119,14 @@ Société    : ${batApproval?.company || company || 'N/A'}
 Email      : ${batApproval?.clientEmail || clientEmail || 'N/A'}
 
 --- SPÉCIFICATIONS TECHNIQUES D'IMPRESSION ---
-Format          : ${formatInfo.label}
-Nombre de volets: ${settings.pageCount} pages (${Math.ceil(settings.pageCount / 2)} feuilles recto/verso)
-Grammage papier : ${settings.paperWeight} g/m² (${weightDesc})
-Finition papier : ${finishName}
+Format              : ${formatInfo.label}
+Nombre de volets    : ${settings.pageCount} pages (${Math.ceil(settings.pageCount / 2)} feuilles recto/verso)
+
+PAPIER COUVERTURE   : ${coverWeight} g/m² (${getWeightDesc(coverWeight)})
+Finition Couverture : ${getFinishLabel(coverFinish)}
+
+PAPIER INTÉRIEUR    : ${isFourPages ? 'Identique couverture (livret 4 pages plié)' : `${insideWeight} g/m² (${getWeightDesc(insideWeight)})`}
+Finition Intérieure : ${isFourPages ? getFinishLabel(coverFinish) : getFinishLabel(insideFinish)}
 
 --- REMARQUES / CONSIGNES ---
 ${batApproval?.notes || notes || 'Aucune remarque particulière.'}
@@ -189,7 +199,7 @@ Conforme aux spécifications transmises pour lancement en production.
             <div className="flex items-center gap-2 mb-3">
               <Sparkles className="w-4 h-4 text-gold-400" />
               <h4 className="text-xs font-bold uppercase tracking-wider text-gold-400">
-                Spécifications d'impression sélectionnées
+                Spécifications d'impression retenues pour fabrication
               </h4>
             </div>
 
@@ -206,18 +216,40 @@ Conforme aux spécifications transmises pour lancement en production.
                 </span>
               </div>
 
+              {/* Cover specs */}
               <div className="p-2.5 rounded-lg bg-dark-800/80 border border-dark-700/50">
-                <span className="text-[11px] text-dark-400 block mb-0.5">Papier &amp; Grammage</span>
-                <span className="font-bold text-gold-400 font-mono">
-                  {settings.paperWeight} g/m²
+                <div className="flex items-center gap-1.5 mb-1">
+                  <BookOpen className="w-3.5 h-3.5 text-gold-400" />
+                  <span className="text-[11px] text-gold-400 font-bold uppercase">Papier Couverture (4p)</span>
+                </div>
+                <span className="font-bold text-dark-100 font-mono block">
+                  {coverWeight} g/m²
                 </span>
-                <span className="text-[11px] text-dark-300 block mt-0.5">{weightDesc}</span>
+                <span className="text-[11px] text-dark-300 block mt-0.5">
+                  {getFinishLabel(coverFinish)}
+                </span>
               </div>
 
+              {/* Inside specs */}
               <div className="p-2.5 rounded-lg bg-dark-800/80 border border-dark-700/50">
-                <span className="text-[11px] text-dark-400 block mb-0.5">Finition de surface</span>
-                <span className="font-bold text-dark-100">{finishShort}</span>
-                <span className="text-[11px] text-dark-300 block mt-0.5">{finishName}</span>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <Layers className="w-3.5 h-3.5 text-gold-400" />
+                  <span className="text-[11px] text-gold-400 font-bold uppercase">Pages Intérieures</span>
+                </div>
+                {isFourPages ? (
+                  <span className="text-[11px] text-dark-300 block">
+                    Identique à la couverture (document 4 pages plié)
+                  </span>
+                ) : (
+                  <>
+                    <span className="font-bold text-dark-100 font-mono block">
+                      {insideWeight} g/m²
+                    </span>
+                    <span className="text-[11px] text-dark-300 block mt-0.5">
+                      {getFinishLabel(insideFinish)}
+                    </span>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -335,7 +367,7 @@ Conforme aux spécifications transmises pour lancement en production.
                     Bon pour accord définitif (BAT) :
                   </strong>{' '}
                   Je certifie avoir examiné attentivement la maquette 3D, les textes, les visuels
-                  et les finitions choisies. Cette validation autorise le lancement de la fabrication.
+                  et les finitions sélectionnées (Couverture &amp; Intérieur). Cette validation autorise le lancement de la fabrication.
                 </span>
               </label>
 

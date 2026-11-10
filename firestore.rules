@@ -1,0 +1,22 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /projects/{projectId} {
+      // Anyone with the specific project link/ID can view the project
+      allow get: if true;
+      
+      // Prohibit enumeration/listing of all projects in the collection
+      allow list: if false;
+
+      // Allow creating or updating the project document with data validation
+      allow create, update: if request.resource.data.projectId == projectId
+        && request.resource.data.settings is map
+        && request.resource.data.pages is list
+        && request.resource.data.pages.size() >= 4
+        && request.resource.data.pages.size() <= 64;
+
+      // No deletion allowed from client side
+      allow delete: if false;
+    }
+  }
+}

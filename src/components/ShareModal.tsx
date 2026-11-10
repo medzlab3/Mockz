@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { X, Copy, Check, ExternalLink, ShieldCheck, Eye, Sparkles } from 'lucide-react';
+import { X, Copy, Check, ExternalLink, ShieldCheck, Eye, Sparkles, RefreshCw } from 'lucide-react';
 import { BookSettings } from '../types';
 
 interface ShareModalProps {
   isOpen: boolean;
   onClose: () => void;
   settings: BookSettings;
+  projectId: string;
   onSwitchToClientMode: () => void;
 }
 
@@ -13,6 +14,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   isOpen,
   onClose,
   settings,
+  projectId,
   onSwitchToClientMode,
 }) => {
   const [copied, setCopied] = useState(false);
@@ -21,12 +23,9 @@ export const ShareModal: React.FC<ShareModalProps> = ({
 
   const params = new URLSearchParams({
     view: 'client',
+    p: projectId,
     format: settings.format,
     pages: String(settings.pageCount),
-    weight: String(settings.paperWeight),
-    finish: settings.paperFinish,
-    angle: String(Math.round(settings.openAngle)),
-    spread: String(settings.currentSpread),
   });
   const clientUrl = `${window.location.origin}${window.location.pathname}?${params.toString()}`;
 
@@ -50,7 +49,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                 Partager la Maquette au Client
               </h3>
               <p className="text-xs text-dark-400">
-                Générez une vue de présentation épurée sans interface d'édition
+                Lien interactif sécurisé et synchronisé en temps réel
               </p>
             </div>
           </div>
@@ -90,30 +89,39 @@ export const ShareModal: React.FC<ShareModalProps> = ({
             </div>
           </div>
 
+          {/* Synchronized Notice */}
+          <div className="p-3.5 rounded-xl bg-gold-400/10 border border-gold-400/20 flex items-start gap-2.5">
+            <RefreshCw className="w-4 h-4 text-gold-400 flex-shrink-0 mt-0.5" />
+            <p className="text-xs text-dark-200 leading-relaxed">
+              <strong className="text-gold-400 font-semibold">Synchronisation Cloud en direct :</strong>{' '}
+              Ce lien reste le même ! Lorsque vous modifiez un visuel ou un paramètre dans votre studio, votre client n'a qu'à cliquer sur <strong>« Actualiser »</strong> sur son écran pour charger vos modifications instantanément.
+            </p>
+          </div>
+
           {/* Features in client view */}
           <div className="p-4 rounded-xl bg-dark-850/80 border border-dark-700/60 space-y-2.5">
             <span className="text-[11px] font-bold uppercase tracking-wider text-dark-400 block mb-1">
-              Ce que votre client verra :
+              Ce que votre client peut faire :
             </span>
 
             <div className="flex items-start gap-2.5 text-xs text-dark-300">
               <ShieldCheck className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
               <span>
-                <strong className="text-dark-100">Visualisation 3D immersive</strong> : rotation 360°, zoom, feuilletage des pages.
+                <strong className="text-dark-100">Visualisation 3D sans outils d'édition</strong> : rotation 360°, zoom, feuilletage immersif.
               </span>
             </div>
 
             <div className="flex items-start gap-2.5 text-xs text-dark-300">
               <Sparkles className="w-4 h-4 text-gold-400 flex-shrink-0 mt-0.5" />
               <span>
-                <strong className="text-dark-100">Fiche technique d'impression</strong> : Format {settings.format.toUpperCase()}, Papier {settings.paperWeight}g/m², finition {settings.paperFinish}.
+                <strong className="text-dark-100">Test des papiers &amp; validation BAT</strong> : le client teste les finitions puis valide le Bon À Tirer officiel.
               </span>
             </div>
 
             <div className="flex items-start gap-2.5 text-xs text-dark-300">
               <Eye className="w-4 h-4 text-gold-400 flex-shrink-0 mt-0.5" />
               <span>
-                <strong className="text-dark-100">Zéro distraction</strong> : les panneaux d'import, téléversement et suppression sont entièrement masqués.
+                <strong className="text-dark-100">Commentaires par page</strong> : le client laisse des annotations et peut consulter vos réponses directes.
               </span>
             </div>
           </div>

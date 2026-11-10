@@ -10,7 +10,10 @@ import {
   Download,
   Upload,
   User,
-  Clock
+  Clock,
+  CornerDownRight,
+  Send,
+  CheckCheck
 } from 'lucide-react';
 import { ClientComment, PageSlot } from '../types';
 
@@ -20,8 +23,9 @@ interface ClientCommentsModalProps {
   comments: ClientComment[];
   pages: PageSlot[];
   onAddComment: (comment: Omit<ClientComment, 'id' | 'createdAt'>) => void;
-  onDeleteComment: (id: string) => void;
-  onToggleResolveComment: (id: string) => void;
+  onAddReply?: (commentId: string, replyText: string) => void;
+  onDeleteComment?: (id: string) => void;
+  onToggleResolveComment?: (id: string) => void;
   isClientMode: boolean;
 }
 
@@ -31,19 +35,24 @@ export const ClientCommentsModal: React.FC<ClientCommentsModalProps> = ({
   comments,
   pages,
   onAddComment,
+  onAddReply,
   onDeleteComment,
   onToggleResolveComment,
   isClientMode,
 }) => {
   const [selectedPage, setSelectedPage] = useState<number | 'all'>('all');
   const [authorName, setAuthorName] = useState(() => {
-    return localStorage.getItem('mockz_author_name') || (isClientMode ? 'Client' : 'Studio');
+    return localStorage.getItem('mockz_author_name') || (isClientMode ? 'Client' : 'Studio Mockz');
   });
   const [commentText, setCommentText] = useState('');
   const [filterPage, setFilterPage] = useState<number | 'all'>('all');
   const [copied, setCopied] = useState(false);
   const [showImportBox, setShowImportBox] = useState(false);
   const [importText, setImportText] = useState('');
+
+  // Replying state (for studio)
+  const [replyingCommentId, setReplyingCommentId] = useState<string | null>(null);
+  const [replyText, setReplyText] = useState('');
 
   if (!isOpen) return null;
 
@@ -60,7 +69,7 @@ export const ClientCommentsModal: React.FC<ClientCommentsModalProps> = ({
     setCommentText((prev) => (prev ? `${prev} [${tag}]` : `[${tag}] `));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmitComment = (e: React.FormEvent) => {
     e.preventDefault();
     if (!commentText.trim()) return;
 
@@ -70,12 +79,19 @@ export const ClientCommentsModal: React.FC<ClientCommentsModalProps> = ({
 
     onAddComment({
       pageIndex: selectedPage,
-      author: authorName.trim() || 'Client',
+      author: authorName.trim() || (isClientMode ? 'Client' : 'Studio'),
       text: commentText.trim(),
       resolved: false,
     });
 
     setCommentText('');
+  };
+
+  const handleSubmitReply = (commentId: string) => {
+    if (!replyText.trim() || !onAddReply) return;
+    onAddReply(commentId, replyText.trim());
+    setReplyText('');
+    setReplyingCommentId(null);
   };
 
   const filteredComments = comments.filter((c) => {
@@ -96,7 +112,13 @@ export const ClientCommentsModal: React.FC<ClientCommentsModalProps> = ({
           ? 'Remarque Générale'
           : `Page ${c.pageIndex} (${pages.find((p) => p.index === c.pageIndex)?.label || 'Page'})`;
       const status = c.resolved ? '[RÉSOLU] ' : '[À CORRIGER] ';
-      summary += `${idx + 1}. ${status}${pageLabel} - par ${c.author} :\n   "${c.text}"\n\n`;
+      summary += `${idx + 1}. ${status}${pageLabel} - par ${c.author} :\n   "${c.text}"\n`;
+      if (c.replies && c.replies.length > 0) {
+        c.replies.forEach((r) => {
+          summary += `   ↳ Réponse (${r.author}) : "${r.text}"\n`;
+        });
+      }
+      summary += '\n';
     });
 
     return summary;
@@ -121,7 +143,6 @@ export const ClientCommentsModal: React.FC<ClientCommentsModalProps> = ({
   const handleImportText = () => {
     if (!importText.trim()) return;
     try {
-      // Check if JSON
       if (importText.trim().startsWith('[') || importText.trim().startsWith('{')) {
         const parsed = JSON.parse(importText);
         const list = Array.isArray(parsed) ? parsed : [parsed];
@@ -136,7 +157,6 @@ export const ClientCommentsModal: React.FC<ClientCommentsModalProps> = ({
           }
         });
       } else {
-        // Plain text lines
         const lines = importText.split('\n').filter((l) => l.trim().length > 0);
         lines.forEach((line) => {
           onAddComment({
@@ -150,7 +170,7 @@ export const ClientCommentsModal: React.FC<ClientCommentsModalProps> = ({
       setImportText('');
       setShowImportBox(false);
     } catch {
-      alert('Format de texte invalide. Veuillez coller une liste de retours ou du JSON valide.');
+      alert('Format invalide. Veuillez coller une liste de retours ou du JSON.');
     }
   };
 
@@ -165,13 +185,15 @@ export const ClientCommentsModal: React.FC<ClientCommentsModalProps> = ({
             </div>
             <div>
               <h3 className="font-bold text-base text-dark-50 flex items-center gap-2">
-                <span>Retours &amp; Annotations Maquette</span>
+                <span>{isClientMode ? 'Vos Retours & Remarques' : 'Retours & Échanges Client'}</span>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-dark-800 text-gold-400 border border-dark-700/80">
                   {comments.length}
                 </span>
               </h3>
               <p className="text-xs text-dark-400">
-                Laissez vos remarques page par page avant validation finale
+                {isClientMode
+                  ? 'Notez vos observations page par page pour le graphiste'
+                  : 'Consultez les demandes du client, répondez et validez les corrections'}
               </p>
             </div>
           </div>
@@ -185,15 +207,15 @@ export const ClientCommentsModal: React.FC<ClientCommentsModalProps> = ({
 
         {/* Content */}
         <div className="p-4 sm:p-6 overflow-y-auto space-y-5 custom-scrollbar flex-1">
-          {/* Add New Comment Box */}
+          {/* Form to Add Comment */}
           <form
-            onSubmit={handleSubmit}
+            onSubmit={handleSubmitComment}
             className="bg-dark-850/80 rounded-xl p-4 border border-dark-700/70 space-y-3"
           >
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold uppercase tracking-wider text-gold-400 flex items-center gap-1.5">
                 <Plus className="w-3.5 h-3.5" />
-                <span>Nouvelle remarque</span>
+                <span>{isClientMode ? 'Ajouter une remarque' : 'Ajouter une note / consigne'}</span>
               </span>
               <div className="flex items-center gap-2">
                 <User className="w-3.5 h-3.5 text-dark-400" />
@@ -220,7 +242,7 @@ export const ClientCommentsModal: React.FC<ClientCommentsModalProps> = ({
                 }}
                 className="bg-dark-800 border border-dark-700/80 text-dark-100 text-xs rounded-xl px-3 py-1.5 focus:outline-none focus:border-gold-400 flex-1"
               >
-                <option value="all">Remarque Générale (Tout le document)</option>
+                <option value="all">Remarque Générale (Tout le livret)</option>
                 {pages.map((p) => (
                   <option key={p.index} value={p.index}>
                     Page {p.index} • {p.label}
@@ -230,18 +252,20 @@ export const ClientCommentsModal: React.FC<ClientCommentsModalProps> = ({
             </div>
 
             {/* Quick tags */}
-            <div className="flex flex-wrap gap-1.5 pt-1">
-              {quickTags.map((tag) => (
-                <button
-                  type="button"
-                  key={tag}
-                  onClick={() => handleQuickTagClick(tag)}
-                  className="text-[10px] px-2 py-0.5 rounded-full bg-dark-800 hover:bg-dark-750 text-dark-300 hover:text-gold-400 border border-dark-700/60 transition-colors"
-                >
-                  +{tag}
-                </button>
-              ))}
-            </div>
+            {isClientMode && (
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {quickTags.map((tag) => (
+                  <button
+                    type="button"
+                    key={tag}
+                    onClick={() => handleQuickTagClick(tag)}
+                    className="text-[10px] px-2 py-0.5 rounded-full bg-dark-800 hover:bg-dark-750 text-dark-300 hover:text-gold-400 border border-dark-700/60 transition-colors"
+                  >
+                    +{tag}
+                  </button>
+                ))}
+              </div>
+            )}
 
             {/* Textarea */}
             <div>
@@ -250,7 +274,11 @@ export const ClientCommentsModal: React.FC<ClientCommentsModalProps> = ({
                 required
                 value={commentText}
                 onChange={(e) => setCommentText(e.target.value)}
-                placeholder="Ex: Attention à l'alignement du titre ou déplacer le logo plus haut..."
+                placeholder={
+                  isClientMode
+                    ? "Ex: Corriger la date en page 3, ajuster le logo un peu plus haut..."
+                    : "Ex: Note technique ou remarque interne pour le projet..."
+                }
                 className="w-full bg-dark-800 border border-dark-700/80 rounded-xl px-3 py-2 text-xs text-dark-100 placeholder-dark-500 focus:outline-none focus:border-gold-400 resize-none"
               />
             </div>
@@ -263,7 +291,7 @@ export const ClientCommentsModal: React.FC<ClientCommentsModalProps> = ({
                 className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-gold-400 hover:bg-gold-300 disabled:opacity-40 disabled:pointer-events-none text-dark-950 transition-all shadow-md shadow-gold-500/20 active:scale-95"
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span>Ajouter la remarque</span>
+                <span>Publier la remarque</span>
               </button>
             </div>
           </form>
@@ -281,7 +309,6 @@ export const ClientCommentsModal: React.FC<ClientCommentsModalProps> = ({
                 className="bg-dark-800 text-[11px] text-dark-200 border border-dark-700 rounded-lg px-2 py-1 focus:outline-none"
               >
                 <option value="all">Toutes ({comments.length})</option>
-                <option value="all">Remarques Générales</option>
                 {pages.map((p) => {
                   const pageCount = comments.filter((c) => c.pageIndex === p.index).length;
                   if (pageCount === 0) return null;
@@ -299,7 +326,7 @@ export const ClientCommentsModal: React.FC<ClientCommentsModalProps> = ({
                 type="button"
                 onClick={handleCopySummary}
                 className="flex items-center gap-1 text-[11px] font-semibold text-dark-300 hover:text-gold-400 bg-dark-800 hover:bg-dark-750 px-2.5 py-1 rounded-lg border border-dark-700 transition-colors"
-                title="Copier le récapitulatif pour l'envoyer"
+                title="Copier le récapitulatif des retours"
               >
                 {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
                 <span>{copied ? 'Copié !' : 'Copier'}</span>
@@ -320,7 +347,7 @@ export const ClientCommentsModal: React.FC<ClientCommentsModalProps> = ({
                   type="button"
                   onClick={() => setShowImportBox(!showImportBox)}
                   className="flex items-center gap-1 text-[11px] font-semibold text-dark-300 hover:text-gold-400 bg-dark-800 hover:bg-dark-750 px-2.5 py-1 rounded-lg border border-dark-700 transition-colors"
-                  title="Importer ou coller des retours envoyés par le client"
+                  title="Importer des retours reçus"
                 >
                   <Upload className="w-3 h-3" />
                   <span>Importer</span>
@@ -362,13 +389,15 @@ export const ClientCommentsModal: React.FC<ClientCommentsModalProps> = ({
           )}
 
           {/* Comments List */}
-          <div className="space-y-2.5">
+          <div className="space-y-3">
             {filteredComments.length === 0 ? (
               <div className="text-center py-8 text-dark-400 space-y-2">
                 <MessageSquare className="w-8 h-8 mx-auto opacity-30" />
                 <p className="text-xs">Aucune remarque enregistrée pour le moment.</p>
                 <p className="text-[11px] text-dark-500">
-                  Utilisez le formulaire ci-dessus pour ajouter des annotations.
+                  {isClientMode
+                    ? "Vos remarques apparaîtront ici et seront transmises au graphiste."
+                    : "Les retours laissés par votre client s'afficheront ici en direct."}
                 </p>
               </div>
             ) : (
@@ -378,17 +407,21 @@ export const ClientCommentsModal: React.FC<ClientCommentsModalProps> = ({
                     ? pages.find((p) => p.index === comment.pageIndex)
                     : null;
 
+                const hasReplies = comment.replies && comment.replies.length > 0;
+                const isReplyingThis = replyingCommentId === comment.id;
+
                 return (
                   <div
                     key={comment.id}
                     className={`p-3.5 rounded-xl border transition-all ${
                       comment.resolved
-                        ? 'bg-dark-850/40 border-dark-800 opacity-60'
+                        ? 'bg-dark-850/50 border-emerald-500/25'
                         : 'bg-dark-800/80 border-dark-700/80'
                     }`}
                   >
+                    {/* Comment Header */}
                     <div className="flex items-center justify-between gap-2 mb-2">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span
                           className={`text-[10px] font-bold px-2 py-0.5 rounded-md border font-mono ${
                             comment.pageIndex === 'all'
@@ -401,11 +434,11 @@ export const ClientCommentsModal: React.FC<ClientCommentsModalProps> = ({
                             : `Page ${comment.pageIndex}${targetPageSlot ? ` • ${targetPageSlot.label}` : ''}`}
                         </span>
 
-                        <span className="text-xs font-semibold text-dark-200">
+                        <span className="text-xs font-semibold text-dark-100">
                           {comment.author}
                         </span>
 
-                        <span className="text-[10px] text-dark-500 flex items-center gap-1">
+                        <span className="text-[10px] text-dark-500 flex items-center gap-1 font-mono">
                           <Clock className="w-3 h-3" />
                           {new Date(comment.createdAt).toLocaleTimeString([], {
                             hour: '2-digit',
@@ -414,35 +447,152 @@ export const ClientCommentsModal: React.FC<ClientCommentsModalProps> = ({
                         </span>
                       </div>
 
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => onToggleResolveComment(comment.id)}
-                          className={`px-2 py-0.5 rounded-md text-[10px] font-semibold flex items-center gap-1 transition-colors ${
-                            comment.resolved
-                              ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25'
-                              : 'text-dark-400 hover:text-emerald-400 hover:bg-emerald-500/10'
-                          }`}
-                          title={comment.resolved ? 'Marquer comme non résolu' : 'Marquer comme résolu'}
-                        >
-                          <CheckCircle2 className="w-3 h-3" />
-                          <span>{comment.resolved ? 'Résolu' : 'À traiter'}</span>
-                        </button>
+                      {/* Status & Actions depending on role */}
+                      <div className="flex items-center gap-1.5">
+                        {isClientMode ? (
+                          /* Client View: READ-ONLY STATUS BADGE (No delete, no resolve button) */
+                          <span
+                            className={`px-2 py-0.5 rounded-md text-[10px] font-semibold flex items-center gap-1 border ${
+                              comment.resolved
+                                ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25'
+                                : 'bg-dark-750 text-dark-400 border-dark-700'
+                            }`}
+                          >
+                            {comment.resolved ? (
+                              <>
+                                <CheckCheck className="w-3 h-3 text-emerald-400" />
+                                <span>Traité par le studio</span>
+                              </>
+                            ) : (
+                              <>
+                                <Clock className="w-3 h-3 text-dark-400" />
+                                <span>En cours d'examen</span>
+                              </>
+                            )}
+                          </span>
+                        ) : (
+                          /* Studio View: CAN VALIDATE & CAN DELETE */
+                          <>
+                            {onToggleResolveComment && (
+                              <button
+                                type="button"
+                                onClick={() => onToggleResolveComment(comment.id)}
+                                className={`px-2 py-0.5 rounded-md text-[10px] font-semibold flex items-center gap-1 transition-colors border ${
+                                  comment.resolved
+                                    ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25'
+                                    : 'text-dark-300 hover:text-emerald-400 bg-dark-750 hover:bg-emerald-500/10 border-dark-700'
+                                }`}
+                                title={comment.resolved ? 'Marquer comme non résolu' : 'Valider la correction comme effectuée'}
+                              >
+                                <CheckCircle2 className="w-3 h-3" />
+                                <span>{comment.resolved ? 'Corrigé ✓' : 'Valider correction'}</span>
+                              </button>
+                            )}
 
-                        <button
-                          type="button"
-                          onClick={() => onDeleteComment(comment.id)}
-                          className="p-1 rounded-md text-dark-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                          title="Supprimer la remarque"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                            {onDeleteComment && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (confirm('Supprimer cette remarque ?')) {
+                                    onDeleteComment(comment.id);
+                                  }
+                                }}
+                                className="p-1 rounded-md text-dark-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                                title="Supprimer la remarque"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </>
+                        )}
                       </div>
                     </div>
 
+                    {/* Comment Body */}
                     <p className="text-xs text-dark-100 whitespace-pre-wrap pl-1 leading-relaxed">
                       {comment.text}
                     </p>
+
+                    {/* Replies Thread */}
+                    {hasReplies && (
+                      <div className="mt-2.5 pt-2 border-t border-dark-750/70 space-y-1.5 pl-3">
+                        {comment.replies!.map((reply) => (
+                          <div
+                            key={reply.id}
+                            className="p-2 rounded-lg bg-dark-850/80 border border-dark-750 text-xs flex items-start gap-2"
+                          >
+                            <CornerDownRight className="w-3.5 h-3.5 text-gold-400 flex-shrink-0 mt-0.5" />
+                            <div className="flex-1">
+                              <div className="flex items-center justify-between mb-0.5">
+                                <span className="text-[11px] font-bold text-gold-400">
+                                  {reply.author}
+                                </span>
+                                <span className="text-[10px] text-dark-500 font-mono">
+                                  {new Date(reply.createdAt).toLocaleTimeString([], {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                  })}
+                                </span>
+                              </div>
+                              <p className="text-dark-200 text-xs leading-relaxed">
+                                {reply.text}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Studio Reply Action */}
+                    {!isClientMode && onAddReply && (
+                      <div className="mt-2 pt-1 flex justify-end">
+                        {!isReplyingThis ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setReplyingCommentId(comment.id);
+                              setReplyText('');
+                            }}
+                            className="text-[11px] font-semibold text-gold-400 hover:text-gold-300 flex items-center gap-1 transition-colors px-2 py-0.5 rounded hover:bg-gold-400/10"
+                          >
+                            <CornerDownRight className="w-3 h-3" />
+                            <span>Répondre au client</span>
+                          </button>
+                        ) : (
+                          <div className="w-full mt-2 p-2.5 rounded-xl bg-dark-850 border border-dark-700/80 space-y-2">
+                            <span className="text-[11px] font-bold text-gold-400 block">
+                              Répondre au commentaire :
+                            </span>
+                            <textarea
+                              rows={2}
+                              autoFocus
+                              value={replyText}
+                              onChange={(e) => setReplyText(e.target.value)}
+                              placeholder="Ex: Correction effectuée sur le fichier, merci de vérifier..."
+                              className="w-full bg-dark-900 border border-dark-700 text-xs p-2 rounded-lg text-dark-100 focus:outline-none focus:border-gold-400 resize-none"
+                            />
+                            <div className="flex justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => setReplyingCommentId(null)}
+                                className="px-2.5 py-1 text-xs text-dark-400 hover:text-dark-200"
+                              >
+                                Annuler
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleSubmitReply(comment.id)}
+                                disabled={!replyText.trim()}
+                                className="flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-bold bg-gold-400 hover:bg-gold-300 text-dark-950 disabled:opacity-40"
+                              >
+                                <Send className="w-3 h-3" />
+                                <span>Envoyer la réponse</span>
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })

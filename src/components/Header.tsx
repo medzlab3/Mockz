@@ -7,7 +7,8 @@ import {
   Share2,
   Menu,
   MessageSquare,
-  FileCheck
+  FileCheck,
+  Cloud
 } from 'lucide-react';
 import { BookSettings, PageFormat, FORMAT_DIMENSIONS, BATApproval } from '../types';
 
@@ -15,6 +16,7 @@ interface HeaderProps {
   settings: BookSettings;
   commentsCount: number;
   batApproval: BATApproval | null;
+  isSavingCloud?: boolean;
   onUpdateSettings: (newSettings: Partial<BookSettings>) => void;
   onExport: () => void;
   onResetCamera: (preset: 'perspective' | 'front' | 'spine') => void;
@@ -29,6 +31,7 @@ export const Header: React.FC<HeaderProps> = ({
   settings,
   commentsCount,
   batApproval,
+  isSavingCloud = false,
   onUpdateSettings,
   onExport,
   onResetCamera,
@@ -38,6 +41,9 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenShareModal,
   onToggleSidebar,
 }) => {
+  const coverWeight = settings.coverPaperWeight || settings.paperWeight || 350;
+  const coverFinish = settings.coverPaperFinish || settings.paperFinish || 'matte';
+
   return (
     <header className="h-14 sm:h-16 border-b border-dark-700/60 bg-dark-900/90 backdrop-blur-xl px-3 sm:px-6 flex items-center justify-between z-20 select-none">
       {/* Left: Brand + Hamburger */}
@@ -60,6 +66,20 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="hidden sm:inline text-[9px] sm:text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-gold-400/10 text-gold-400 border border-gold-400/25">
               3D Print Studio
             </span>
+
+            {/* Cloud Sync Indicator */}
+            <span
+              className={`hidden md:flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border transition-all ${
+                isSavingCloud
+                  ? 'bg-amber-500/10 text-amber-400 border-amber-500/20 animate-pulse'
+                  : 'bg-dark-800 text-dark-400 border-dark-700/60'
+              }`}
+              title="Vos modifications sont automatiquement synchronisées pour le client"
+            >
+              <Cloud className="w-3 h-3" />
+              <span>{isSavingCloud ? 'Synchronisation...' : 'En ligne'}</span>
+            </span>
+
             {batApproval?.approved && (
               <button
                 type="button"
@@ -155,7 +175,7 @@ export const Header: React.FC<HeaderProps> = ({
           <Sparkles className="w-3.5 h-3.5 text-gold-400" />
           <span className="hidden sm:inline">Papiers &amp; Finitions</span>
           <span className="text-[10px] px-1.5 py-0.5 rounded bg-gold-400/15 text-gold-400 font-mono hidden md:inline">
-            {settings.paperWeight}g • {settings.paperFinish}
+            {coverWeight}g • {coverFinish}
           </span>
         </button>
 
